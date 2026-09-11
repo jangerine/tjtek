@@ -14,7 +14,6 @@
         button:hover { filter: brightness(1.1); }
         button:disabled { background-color: #6c757d !important; cursor: not-allowed; opacity: 0.6; }
         
-        /* 버튼 스타일 */
         .btn-fold { background-color: #e63946; }
         .btn-call { background-color: #3a86ff; }
         .btn-raise { background-color: #ff006e; }
@@ -28,60 +27,30 @@
         .player-card.active-turn { border-color: #ffb703; background: rgba(255, 183, 3, 0.15); }
         .player-card.folded { opacity: 0.4; }
         
-        .card-box { display: flex; justify-content: center; gap: 10px; margin: 15px 0; }
-        .card { width: 75px; height: 110px; background: #b7094c; border: 2px solid #fff; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; }
+        /* 🎴 화투 카드 스타일 수정 */
+        .card-box { display: flex; justify-content: center; gap: 15px; margin: 20px 0; }
+        .card-wrapper { display: flex; flex-direction: column; align-items: center; }
+        .card-img { 
+            width: 85px; 
+            height: 135px; 
+            border-radius: 8px; 
+            border: 2px solid #fff; 
+            box-shadow: 0 4px 8px rgba(0,0,0,0.4); 
+            background-color: #b7094c;
+            object-fit: cover;
+        }
+        .card-label { margin-top: 5px; font-size: 14px; font-weight: bold; color: #ffd166; }
+
         .result-box { background: rgba(0, 0, 0, 0.4); padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid #ffb703; }
 
-        /* ------------------- 족보 모달(팝업) 스타일 ------------------- */
-        .modal-overlay {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.75);
-            z-index: 1000;
-            justify-content: center;
-            align-items: center;
-        }
-        .modal-content {
-            background: #1b4332;
-            border: 2px solid #ffb703;
-            border-radius: 12px;
-            width: 90%;
-            max-width: 500px;
-            max-height: 80vh;
-            overflow-y: auto;
-            padding: 20px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
-            text-align: left;
-            position: relative;
-        }
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 2px solid #2d6a4f;
-            padding-bottom: 10px;
-            margin-bottom: 15px;
-        }
+        /* 족보 모달 스타일 */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.75); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-content { background: #1b4332; border: 2px solid #ffb703; border-radius: 12px; width: 90%; max-width: 500px; max-height: 80vh; overflow-y: auto; padding: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); text-align: left; position: relative; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #2d6a4f; padding-bottom: 10px; margin-bottom: 15px; }
         .modal-header h2 { margin: 0; color: #ffb703; font-size: 20px; }
-        .close-btn {
-            background: none;
-            border: none;
-            color: #fff;
-            font-size: 24px;
-            cursor: pointer;
-            padding: 0;
-            margin: 0;
-        }
-        .jokbo-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 14px;
-        }
-        .jokbo-table th, .jokbo-table td {
-            padding: 8px;
-            border-bottom: 1px solid #2d6a4f;
-        }
+        .close-btn { background: none; border: none; color: #fff; font-size: 24px; cursor: pointer; padding: 0; margin: 0; }
+        .jokbo-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .jokbo-table th, .jokbo-table td { padding: 8px; border-bottom: 1px solid #2d6a4f; }
         .jokbo-table th { background: #081c15; color: #d8f3dc; text-align: center; }
         .jokbo-table td:first-child { font-weight: bold; color: #ffb703; width: 28%; }
         .jokbo-table td:nth-child(2) { width: 32%; text-align: center; }
@@ -125,7 +94,7 @@
         </div>
     </div>
 
-    <!-- ------------------- 족보표 모달(팝업창) HTML ------------------- -->
+    <!-- 족보표 모달 -->
     <div id="jokbo-modal" class="modal-overlay" onclick="closeJokboModal(event)">
         <div class="modal-content" onclick="event.stopPropagation()">
             <div class="modal-header">
@@ -134,11 +103,7 @@
             </div>
             <table class="jokbo-table">
                 <thead>
-                    <tr>
-                        <th>서열</th>
-                        <th>족보 이름</th>
-                        <th>조합 패</th>
-                    </tr>
+                    <tr><th>서열</th><th>족보 이름</th><th>조합 패</th></tr>
                 </thead>
                 <tbody>
                     <tr><td>1위 (최상)</td><td><b>38광땡</b></td><td>3광 + 8광</td></tr>
@@ -168,45 +133,53 @@
         const socket = io();
         let myId = '';
 
-        // 모달 제어 함수
-        function openJokboModal() {
-            document.getElementById('jokbo-modal').style.display = 'flex';
-        }
+        // 🖼️ 화투패 20장의 고화질 오픈소스 이미지 매핑 데이터
+        const CARD_IMAGES = {
+            '1광': 'https://upload.wikimedia.org/wikipedia/commons/2/25/Hanafuda_01-1.svg',
+            '1피': 'https://upload.wikimedia.org/wikipedia/commons/c/cd/Hanafuda_01-4.svg',
+            '2열': 'https://upload.wikimedia.org/wikipedia/commons/0/05/Hanafuda_02-1.svg',
+            '2피': 'https://upload.wikimedia.org/wikipedia/commons/7/75/Hanafuda_02-4.svg',
+            '3광': 'https://upload.wikimedia.org/wikipedia/commons/8/8b/Hanafuda_03-1.svg',
+            '3피': 'https://upload.wikimedia.org/wikipedia/commons/1/12/Hanafuda_03-4.svg',
+            '4열': 'https://upload.wikimedia.org/wikipedia/commons/c/c5/Hanafuda_04-1.svg',
+            '4피': 'https://upload.wikimedia.org/wikipedia/commons/3/30/Hanafuda_04-4.svg',
+            '5열': 'https://upload.wikimedia.org/wikipedia/commons/1/1d/Hanafuda_05-1.svg',
+            '5피': 'https://upload.wikimedia.org/wikipedia/commons/5/52/Hanafuda_05-4.svg',
+            '6띠': 'https://upload.wikimedia.org/wikipedia/commons/1/10/Hanafuda_06-2.svg',
+            '6피': 'https://upload.wikimedia.org/wikipedia/commons/d/da/Hanafuda_06-4.svg',
+            '7열': 'https://upload.wikimedia.org/wikipedia/commons/a/a2/Hanafuda_07-1.svg',
+            '7피': 'https://upload.wikimedia.org/wikipedia/commons/8/88/Hanafuda_07-4.svg',
+            '8광': 'https://upload.wikimedia.org/wikipedia/commons/1/13/Hanafuda_08-1.svg',
+            '8피': 'https://upload.wikimedia.org/wikipedia/commons/3/32/Hanafuda_08-4.svg',
+            '9열': 'https://upload.wikimedia.org/wikipedia/commons/6/6d/Hanafuda_09-1.svg',
+            '9피': 'https://upload.wikimedia.org/wikipedia/commons/c/c1/Hanafuda_09-4.svg',
+            '10열': 'https://upload.wikimedia.org/wikipedia/commons/2/23/Hanafuda_10-1.svg',
+            '10피': 'https://upload.wikimedia.org/wikipedia/commons/c/c1/Hanafuda_10-4.svg'
+        };
 
-        function closeJokboModal(e) {
-            document.getElementById('jokbo-modal').style.display = 'none';
-        }
+        function openJokboModal() { document.getElementById('jokbo-modal').style.display = 'flex'; }
+        function closeJokboModal() { document.getElementById('jokbo-modal').style.display = 'none'; }
 
         function joinGame() {
             const username = document.getElementById('username').value;
             if (!username) return alert('닉네임을 입력하세요!');
-            
             socket.emit('joinGame', username);
             document.getElementById('login-section').style.display = 'none';
             document.getElementById('game-section').style.display = 'block';
         }
 
-        function startGame() {
-            socket.emit('startGame');
-        }
+        function startGame() { socket.emit('startGame'); }
+        function sendAction(action) { socket.emit('playerAction', action); }
 
-        function sendAction(action) {
-            socket.emit('playerAction', action);
-        }
-
-        socket.on('connect', () => {
-            myId = socket.id;
-        });
+        socket.on('connect', () => { myId = socket.id; });
 
         socket.on('updateGameState', (state) => {
             document.getElementById('pot-amount').innerText = state.pot.toLocaleString();
 
             const badge = document.getElementById('round-indicator');
-            if (state.gameInProgress) {
-                badge.innerText = state.bettingRound === 1 ? '1차 배팅 진행 중' : '2차 배팅 진행 중';
-            } else {
-                badge.innerText = '대기 중';
-            }
+            badge.innerText = state.gameInProgress 
+                ? (state.bettingRound === 1 ? '1차 배팅 진행 중' : '2차 배팅 진행 중') 
+                : '대기 중';
 
             const container = document.getElementById('players-container');
             container.innerHTML = state.players.map(p => {
@@ -233,15 +206,23 @@
             document.getElementById('btn-allin').disabled = !isMyTurn;
         });
 
+        // 🖼️ 게임 시작 시 내 카드에 화투 이미지 표시
         socket.on('gameStarted', (data) => {
             document.getElementById('game-results').style.display = 'none';
             document.getElementById('play-area').style.display = 'block';
             
             const cardBox = document.getElementById('my-cards');
-            cardBox.innerHTML = data.myCards.map(c => `<div class="card">${c.name}</div>`).join('');
+            cardBox.innerHTML = data.myCards.map(c => `
+                <div class="card-wrapper">
+                    <img class="card-img" src="${CARD_IMAGES[c.name]}" alt="${c.name}">
+                    <span class="card-label">${c.name}</span>
+                </div>
+            `).join('');
+            
             document.getElementById('my-hand-title').innerText = `내 족보: ${data.myHand.name}`;
         });
 
+        // 🖼️ 게임 종료 후 모든 플레이어의 패 공개 (화투 이미지 포함)
         socket.on('gameFinished', (data) => {
             const resultDiv = document.getElementById('game-results');
             resultDiv.style.display = 'block';
@@ -261,8 +242,13 @@
             html += `<h4>전체 패 공개</h4>`;
             data.allPlayers.forEach(p => {
                 const handName = p.handResult ? p.handResult.name : '기권';
-                const cardNames = p.cards && p.cards.length > 0 ? p.cards.map(c => c.name).join(', ') : '패 없음';
-                html += `<p><b>${p.name}</b>: ${cardNames} → <i>${p.folded ? '다이' : handName}</i></p>`;
+                const cardImgs = (p.cards && p.cards.length > 0)
+                    ? p.cards.map(c => `<img src="${CARD_IMAGES[c.name]}" style="width:30px; height:48px; vertical-align:middle; margin:0 2px; border-radius:3px;">`).join('')
+                    : '패 없음';
+                
+                html += `<div style="margin-bottom: 8px;">
+                    <b>${p.name}</b>: ${cardImgs} → <span style="color:#ffd166;">${p.folded ? '다이' : handName}</span>
+                </div>`;
             });
             
             resultDiv.innerHTML = html;
