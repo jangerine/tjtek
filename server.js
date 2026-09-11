@@ -28,14 +28,18 @@ const ANTE = 500;
 let players = [];
 let gameInProgress = false;
 
-// 게임 배팅 관련 상태 변수
-let pot = 0;               // 판돈
-let currentBet = 0;        // 현재 턴의 최고 배팅금액
+// 게임 진행 및 배팅 관련 상태
+let pot = 0;               // 총 판돈
+let currentBet = 0;        // 현재 라운드의 최고 배팅금액
 let turnIndex = 0;         // 현재 베팅 순서
-let activePlayers = [];    // 살아있는(폴드 안한) 플레이어 목록
-let playersToAct = 0;      // 턴 진행 필요한 플레이어 수
+let bettingRound = 1;      // 1: 초구 배팅(1장), 2: 재구 배팅(2장)
+let activePlayers = [];    
+let playersToAct = 0;      
+let currentDeck = [];
 
 function evaluateHand(card1, card2) {
+    if (!card1 || !card2) return { rank: 0, name: '계산 불가' };
+    
     const m1 = Math.min(card1.month, card2.month);
     const m2 = Math.max(card1.month, card2.month);
     
@@ -115,6 +119,7 @@ function broadcastGameState() {
         pot,
         currentBet,
         turnPlayerId,
+        bettingRound,
         gameInProgress,
         players: players.map(p => ({
             id: p.id,
@@ -122,15 +127,49 @@ function broadcastGameState() {
             chips: p.chips,
             betAmount: p.betAmount,
             folded: p.folded,
-            isAllIn: p.isAllIn
+            isAllIn: p.isAllIn,
+            cardCount: p.cards.length
         }))
     });
+}
+
+function startSecondBettingRound() {
+    bettingRound = 2;
+    currentBet = 0;
+    
+    // 2번째 카드 배분 및 최종 족보 계산
+    activePlayers.forEach(p => {
+        if (!p.folded) {
+            p.cards.push(currentDeck.pop());
+            p.handResult = evaluateHand(p.cards[0], p.cards[1]);
+            p.betAmount = 0; // 2라운드 베팅 금액 초기화
+        }
+    });
+
+    // 개별 유저에게 2번째 카드가 추가된 정보 업데이트
+    activePlayers.forEach(p => {
+        if (!p.folded) {
+            io.to(p.id).emit('cardsUpdated', {
+                myCards: p.cards,
+                myHand: p.handResult,
+                round: 2
+            });
+        }
+    });
+
+    // 베팅 순서 리셋
+    turnIndex = 0;
+    while (activePlayers[turnIndex].folded || activePlayers[turnIndex].isAllIn) {
+        turnIndex = (turnIndex + 1) % activePlayers.length;
+    }
+    
+    playersToAct = activePlayers.filter(p => !p.folded && !p.isAllIn).length;
+    broadcastGameState();
 }
 
 function nextTurn() {
     playersToAct--;
 
-    // 1명 빼고 다 죽었을 때 (기권승)
     const alivePlayers = activePlayers.filter(p => !p.folded);
     if (alivePlayers.length === 1) {
         const winner = alivePlayers[0];
@@ -145,13 +184,19 @@ function nextTurn() {
         return;
     }
 
-    // 베팅 라운드 종료 조건 (모든 플레이어 베팅 액수가 같고 턴이 다 돌았을 때)
+    // 현재 베팅 라운드 종료 처리
     if (playersToAct <= 0) {
-        finishShowdown();
+        if (bettingRound === 1) {
+            // 1차 배팅 종료 ➔ 2차 배팅 라운드로 이동
+            startSecondBettingRound();
+        } else {
+            // 2차 배팅 종료 ➔ 최후 승자 공개 (쇼다운)
+            finishShowdown();
+        }
         return;
     }
 
-    // 다음 순서 플레이어 찾기 (폴드 및 올인 상태 스킵)
+    // 다음 순서 찾기 (다이했거나 올인한 사람 패스)
     do {
         turnIndex = (turnIndex + 1) % activePlayers.length;
     } while (activePlayers[turnIndex].folded || activePlayers[turnIndex].isAllIn);
@@ -164,12 +209,11 @@ function finishShowdown() {
     const outcome = calculateGameOutcome(surviving);
 
     if (outcome.isRematch) {
-        // 재경기일 경우 판돈(pot)은 그대로 유지하고 게임 초기화
         io.emit('gameFinished', { outcome, allPlayers: players, pot });
     } else {
         outcome.winner.chips += pot;
         io.emit('gameFinished', { outcome, allPlayers: players, pot });
-        pot = 0; // 판돈 지급 완료
+        pot = 0;
     }
 
     resetGameVars();
@@ -179,10 +223,12 @@ function finishShowdown() {
 function resetGameVars() {
     gameInProgress = false;
     currentBet = 0;
+    bettingRound = 1;
     players.forEach(p => {
         p.betAmount = 0;
         p.folded = false;
         p.isAllIn = false;
+        p.cards = [];
     });
 }
 
@@ -213,7 +259,6 @@ io.on('connection', (socket) => {
         }
         if (gameInProgress) return;
 
-        // 칩 부족 유저 확인
         const brokePlayer = players.find(p => p.chips < ANTE);
         if (brokePlayer) {
             socket.emit('errorMessage', `${brokePlayer.name}님의 칩이 부족합니다 (최소 기본금 500 필요).`);
@@ -221,6 +266,7 @@ io.on('connection', (socket) => {
         }
 
         gameInProgress = true;
+        bettingRound = 1;
         currentBet = ANTE;
 
         // 앤티(기본금) 징수
@@ -229,6 +275,7 @@ io.on('connection', (socket) => {
             p.betAmount = ANTE;
             p.folded = false;
             p.isAllIn = false;
+            p.cards = [];
             pot += ANTE;
         });
 
@@ -236,25 +283,23 @@ io.on('connection', (socket) => {
         turnIndex = 0;
         playersToAct = activePlayers.length;
 
-        // 덱 섞기 및 카드 배분
-        let deck = [...INITIAL_DECK].sort(() => Math.random() - 0.5);
+        // 덱 섞기 및 각자 1차 카드 1장 배분
+        currentDeck = [...INITIAL_DECK].sort(() => Math.random() - 0.5);
         players.forEach(p => {
-            p.cards = [deck.pop(), deck.pop()];
-            p.handResult = evaluateHand(p.cards[0], p.cards[1]);
+            p.cards = [currentDeck.pop()];
         });
 
-        // 개인별 카드 패 전달
+        // 1차 카드 개별 전달
         players.forEach(p => {
             io.to(p.id).emit('gameStarted', {
                 myCards: p.cards,
-                myHand: p.handResult
+                round: 1
             });
         });
 
         broadcastGameState();
     });
 
-    // 베팅 액션 처리 (콜, 다이, 레이즈, 올인)
     socket.on('playerAction', (action) => {
         if (!gameInProgress) return;
         const player = activePlayers[turnIndex];
@@ -262,20 +307,19 @@ io.on('connection', (socket) => {
 
         const callAmount = currentBet - player.betAmount;
 
-        if (action === 'fold') { // 다이
+        if (action === 'fold') {
             player.folded = true;
-        } else if (action === 'call') { // 콜
+        } else if (action === 'call') {
             const betNeeded = Math.min(callAmount, player.chips);
             player.chips -= betNeeded;
             player.betAmount += betNeeded;
             pot += betNeeded;
             if (player.chips === 0) player.isAllIn = true;
-        } else if (action === 'raise') { // 2배 레이즈
-            const raiseTarget = currentBet * 2;
+        } else if (action === 'raise') {
+            const raiseTarget = currentBet === 0 ? ANTE * 2 : currentBet * 2;
             const additionalBet = raiseTarget - player.betAmount;
 
             if (player.chips <= additionalBet) {
-                // 잔액 부족 시 자동으로 올인 처리
                 const allInAmount = player.chips;
                 player.chips = 0;
                 player.betAmount += allInAmount;
@@ -289,7 +333,7 @@ io.on('connection', (socket) => {
                 currentBet = raiseTarget;
                 playersToAct = activePlayers.filter(p => !p.folded && !p.isAllIn).length;
             }
-        } else if (action === 'allin') { // 올인
+        } else if (action === 'allin') {
             const allInAmount = player.chips;
             player.chips = 0;
             player.betAmount += allInAmount;
