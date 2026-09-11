@@ -6,19 +6,23 @@
     <title>온라인 실시간 섯다</title>
     <style>
         body { font-family: 'Noto Sans KR', sans-serif; background-color: #1b4332; color: #fff; text-align: center; padding: 20px; }
-        .container { max-width: 650px; margin: 0 auto; background: #2d6a4f; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        .container { max-width: 650px; margin: 0 auto; background: #2d6a4f; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); position: relative; }
         h1 { color: #d8f3dc; margin-bottom: 5px; }
+        
         input, button { padding: 10px 15px; font-size: 15px; margin: 5px; border-radius: 5px; border: none; font-weight: bold; }
         button { cursor: pointer; color: white; background-color: #52b788; }
         button:hover { filter: brightness(1.1); }
         button:disabled { background-color: #6c757d !important; cursor: not-allowed; opacity: 0.6; }
+        
+        /* 버튼 스타일 */
         .btn-fold { background-color: #e63946; }
         .btn-call { background-color: #3a86ff; }
         .btn-raise { background-color: #ff006e; }
         .btn-allin { background-color: #fb5607; }
+        .btn-help { background-color: #7209b7; color: #fff; float: right; margin-bottom: 10px; }
         
         .round-badge { background-color: #ff006e; color: white; padding: 5px 14px; border-radius: 20px; font-size: 14px; font-weight: bold; display: inline-block; margin-bottom: 10px; }
-        .pot-box { background: #081c15; border: 2px solid #d8f3dc; padding: 10px; border-radius: 8px; margin: 10px 0; font-size: 20px; font-weight: bold; color: #ffb703; }
+        .pot-box { background: #081c15; border: 2px solid #d8f3dc; padding: 10px; border-radius: 8px; margin: 10px 0; font-size: 20px; font-weight: bold; color: #ffb703; clear: both; }
         .player-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
         .player-card { background: rgba(0,0,0,0.25); padding: 10px; border-radius: 8px; border: 2px solid transparent; text-align: left; }
         .player-card.active-turn { border-color: #ffb703; background: rgba(255, 183, 3, 0.15); }
@@ -27,10 +31,67 @@
         .card-box { display: flex; justify-content: center; gap: 10px; margin: 15px 0; }
         .card { width: 75px; height: 110px; background: #b7094c; border: 2px solid #fff; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; }
         .result-box { background: rgba(0, 0, 0, 0.4); padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid #ffb703; }
+
+        /* ------------------- 족보 모달(팝업) 스타일 ------------------- */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.75);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background: #1b4332;
+            border: 2px solid #ffb703;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 80vh;
+            overflow-y: auto;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+            text-align: left;
+            position: relative;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #2d6a4f;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .modal-header h2 { margin: 0; color: #ffb703; font-size: 20px; }
+        .close-btn {
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            margin: 0;
+        }
+        .jokbo-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        .jokbo-table th, .jokbo-table td {
+            padding: 8px;
+            border-bottom: 1px solid #2d6a4f;
+        }
+        .jokbo-table th { background: #081c15; color: #d8f3dc; text-align: center; }
+        .jokbo-table td:first-child { font-weight: bold; color: #ffb703; width: 28%; }
+        .jokbo-table td:nth-child(2) { width: 32%; text-align: center; }
+        .jokbo-table td:last-child { color: #d8f3dc; width: 40%; }
+        .special-rule { background: rgba(255, 183, 3, 0.1); }
     </style>
 </head>
 <body>
     <div class="container">
+        <button class="btn-help" onclick="openJokboModal()">📖 족보표 보기</button>
         <h1>🎴 실시간 섯다</h1>
         
         <div id="login-section">
@@ -64,10 +125,57 @@
         </div>
     </div>
 
+    <!-- ------------------- 족보표 모달(팝업창) HTML ------------------- -->
+    <div id="jokbo-modal" class="modal-overlay" onclick="closeJokboModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2>🎴 섯다 족보 순위표</h2>
+                <button class="close-btn" onclick="closeJokboModal()">&times;</button>
+            </div>
+            <table class="jokbo-table">
+                <thead>
+                    <tr>
+                        <th>서열</th>
+                        <th>족보 이름</th>
+                        <th>조합 패</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>1위 (최상)</td><td><b>38광땡</b></td><td>3광 + 8광</td></tr>
+                    <tr><td>2위</td><td><b>18 / 13광땡</b></td><td>1광 + 8광 / 1광 + 3광</td></tr>
+                    <tr><td>3위</td><td><b>장땡</b></td><td>10월 + 10월</td></tr>
+                    <tr><td>4위~11위</td><td><b>9땡 ~ 1땡</b></td><td>같은 월 2장 (9~1)</td></tr>
+                    <tr><td>12위</td><td><b>알리</b></td><td>1월 + 2월</td></tr>
+                    <tr><td>13위</td><td><b>독사</b></td><td>1월 + 4월</td></tr>
+                    <tr><td>14위</td><td><b>구삥</b></td><td>1월 + 9월</td></tr>
+                    <tr><td>15위</td><td><b>장삥</b></td><td>1월 + 10월</td></tr>
+                    <tr><td>16위</td><td><b>장사</b></td><td>4월 + 10월</td></tr>
+                    <tr><td>17위</td><td><b>세륙</b></td><td>4월 + 6월</td></tr>
+                    <tr><td>18위</td><td><b>갑오 (9끗)</b></td><td>두 월의 합의 일의 자리가 9</td></tr>
+                    <tr><td>19위~26위</td><td><b>8끗 ~ 1끗</b></td><td>두 월의 합의 일의 자리가 8~1</td></tr>
+                    <tr><td>27위 (최하)</td><td><b>망통 (0끗)</b></td><td>두 월의 합의 일의 자리가 0</td></tr>
+                    <tr class="special-rule"><td>특수 족보</td><td><b>암행어사</b></td><td>4열 + 7열 (18/13광땡 제압)</td></tr>
+                    <tr class="special-rule"><td>특수 족보</td><td><b>땡잡이</b></td><td>3광 + 7열 (9땡 이하 제압)</td></tr>
+                    <tr class="special-rule"><td>특수 족보</td><td><b>구사 (재경기)</b></td><td>4월 + 9월 (알리 이하 시 재경기)</td></tr>
+                    <tr class="special-rule"><td>특수 족보</td><td><b>멍구사 (재경기)</b></td><td>4열 + 9열 (9땡 이하 시 재경기)</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
         let myId = '';
+
+        // 모달 제어 함수
+        function openJokboModal() {
+            document.getElementById('jokbo-modal').style.display = 'flex';
+        }
+
+        function closeJokboModal(e) {
+            document.getElementById('jokbo-modal').style.display = 'none';
+        }
 
         function joinGame() {
             const username = document.getElementById('username').value;
@@ -100,8 +208,6 @@
                 badge.innerText = '대기 중';
             }
 
-            const me = state.players.find(p => p.id === myId);
-
             const container = document.getElementById('players-container');
             container.innerHTML = state.players.map(p => {
                 const isMyTurn = p.id === state.turnPlayerId;
@@ -121,23 +227,10 @@
             document.getElementById('start-btn').style.display = state.gameInProgress ? 'none' : 'inline-block';
 
             const isMyTurn = myId === state.turnPlayerId && state.gameInProgress;
-            
-            // 버튼별 세부 비활성화 제어
             document.getElementById('btn-fold').disabled = !isMyTurn;
             document.getElementById('btn-call').disabled = !isMyTurn;
-            
-            if (me && isMyTurn) {
-                const raiseTarget = state.currentBet === 0 ? 1000 : state.currentBet * 2;
-                const additionalBetNeeded = raiseTarget - me.betAmount;
-
-                // 칩이 모자라면 레이즈 버튼 비활성화
-                document.getElementById('btn-raise').disabled = me.chips < additionalBetNeeded;
-                // 칩이 0이면 올인 버튼 비활성화
-                document.getElementById('btn-allin').disabled = me.chips <= 0;
-            } else {
-                document.getElementById('btn-raise').disabled = true;
-                document.getElementById('btn-allin').disabled = true;
-            }
+            document.getElementById('btn-raise').disabled = !isMyTurn;
+            document.getElementById('btn-allin').disabled = !isMyTurn;
         });
 
         socket.on('gameStarted', (data) => {
