@@ -38,8 +38,10 @@ let gameInProgress = false;
 let pot = 0;
 let currentTurnIndex = 0;
 let currentHighBet = 0;
-let actionCount = 0; // 한 라운드 내 액션 수행 횟수
-const BASE_BET = 500;
+let BASE_BET = 500;
+
+// 각 플레이어별 라운드 행동 수행 여부 추적
+let actedPlayers = new Set();
 
 // 🧠 섯다 족보 계산 함수
 function evaluateHand(cards) {
@@ -90,7 +92,7 @@ function shuffleDeck() {
     return deck;
 }
 
-// 다음 순서 플레이어 찾기 (Fold/All-in 제외)
+// 다음 턴 플레이어 검색
 function getNextTurnIndex(startIndex) {
     let idx = (startIndex + 1) % players.length;
     let count = 0;
@@ -104,9 +106,9 @@ function getNextTurnIndex(startIndex) {
     return startIndex;
 }
 
-// 살아있는(Fold하지 않은) 플레이어 수
-function getAlivePlayersCount() {
-    return players.filter(p => !p.folded).length;
+// 살아있는(Fold 하지 않은) 플레이어 목록
+function getAlivePlayers() {
+    return players.filter(p => !p.folded);
 }
 
 function broadcastGameState() {
@@ -159,7 +161,7 @@ io.on('connection', (socket) => {
         gameInProgress = true;
         pot = 0;
         currentHighBet = BASE_BET;
-        actionCount = 0;
+        actedPlayers.clear();
 
         const deck = shuffleDeck();
 
@@ -189,7 +191,8 @@ io.on('connection', (socket) => {
         const player = players[currentTurnIndex];
         if (socket.id !== player.id || player.folded) return;
 
-        actionCount++;
+        // 행동 수행 기록
+        actedPlayers.add(player.id);
 
         if (action === 'fold') {
             player.folded = true;
@@ -213,6 +216,9 @@ io.on('connection', (socket) => {
                 player.betAmount += needBet;
                 pot += needBet;
                 currentHighBet = targetBet;
+                // 레이즈 발생 시, 다른 생존 플레이어들이 다시 콜/레이즈를 해야 하므로 행동 기록 리셋
+                actedPlayers.clear();
+                actedPlayers.add(player.id);
             } else {
                 return socket.emit('errorMessage', '칩이 부족하여 레이즈할 수 없습니다!');
             }
@@ -221,17 +227,21 @@ io.on('connection', (socket) => {
             player.betAmount += player.chips;
             if (player.betAmount > currentHighBet) {
                 currentHighBet = player.betAmount;
+                actedPlayers.clear();
+                actedPlayers.add(player.id);
             }
             player.chips = 0;
             player.isAllIn = true;
         }
 
-        // 1. 다이 후 단 1명만 살아남은 경우 -> 기권 승리
-        if (getAlivePlayersCount() === 1) {
+        const alivePlayers = getAlivePlayers();
+
+        // 1. 다이 결과로 최후의 1명만 남은 경우 -> 즉시 승리
+        if (alivePlayers.length === 1) {
             return finishGameByFold();
         }
 
-        // 2. 게임 진행 상황 검사 (다음 턴으로 넘기거나 Showdown)
+        // 2. 배팅 라운드 진행 및 종료 여부 검사
         checkTurnProgress();
     });
 
@@ -246,15 +256,16 @@ io.on('connection', (socket) => {
 });
 
 function checkTurnProgress() {
-    const alivePlayers = players.filter(p => !p.folded); // Fold 안 한 플레이어들
-    const activePlayers = alivePlayers.filter(p => !p.isAllIn); // 올인도 안 한 플레이어들
+    const alivePlayers = getAlivePlayers();
+    const activePlayers = alivePlayers.filter(p => !p.isAllIn); // 올인하지 않은 생존자
 
     // 배팅 완료 조건:
-    // 1) 최소한 턴이 한 바퀴 이상 진행되었고 (actionCount >= alivePlayers.length)
-    // 2) 생존한 플레이어들의 배팅액이 최고 배팅액(currentHighBet)과 같거나 올인 상태인 경우
+    // 1) 모든 생존자의 배팅 금액이 최고 배팅액과 동일하거나 올인 상태
+    // 2) 모든 active 플레이어가 최소 한 번 이상 행동을 완료함
     const isBetsEqual = alivePlayers.every(p => p.betAmount === currentHighBet || p.isAllIn);
+    const hasAllActed = activePlayers.every(p => actedPlayers.has(p.id));
 
-    if ((actionCount >= alivePlayers.length && isBetsEqual) || activePlayers.length <= 1) {
+    if ((isBetsEqual && hasAllActed) || activePlayers.length <= 1) {
         finishGameWithShowdown();
     } else {
         currentTurnIndex = getNextTurnIndex(currentTurnIndex);
@@ -263,7 +274,7 @@ function checkTurnProgress() {
 }
 
 function finishGameByFold() {
-    const winner = players.find(p => !p.folded);
+    const winner = getAlivePlayers()[0];
     winner.chips += pot;
 
     io.emit('gameFinished', {
@@ -286,8 +297,8 @@ function finishGameByFold() {
 }
 
 function finishGameWithShowdown() {
-    const activePlayers = players.filter(p => !p.folded);
-    const results = activePlayers.map(p => ({
+    const alivePlayers = getAlivePlayers();
+    const results = alivePlayers.map(p => ({
         player: p,
         hand: evaluateHand(p.cards)
     }));
