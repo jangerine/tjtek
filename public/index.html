@@ -7,7 +7,7 @@
     <style>
         body { font-family: 'Noto Sans KR', sans-serif; background-color: #1b4332; color: #fff; text-align: center; padding: 20px; }
         .container { max-width: 650px; margin: 0 auto; background: #2d6a4f; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
-        h1 { color: #d8f3dc; margin-bottom: 10px; }
+        h1 { color: #d8f3dc; margin-bottom: 5px; }
         input, button { padding: 10px 15px; font-size: 15px; margin: 5px; border-radius: 5px; border: none; font-weight: bold; }
         button { cursor: pointer; color: white; background-color: #52b788; }
         button:hover { filter: brightness(1.1); }
@@ -17,7 +17,8 @@
         .btn-raise { background-color: #ff006e; }
         .btn-allin { background-color: #fb5607; }
         
-        .pot-box { background: #081c15; border: 2px solid #d8f3dc; padding: 10px; border-radius: 8px; margin: 15px 0; font-size: 20px; font-weight: bold; color: #ffb703; }
+        .round-badge { background-color: #ff006e; color: white; padding: 5px 14px; border-radius: 20px; font-size: 14px; font-weight: bold; display: inline-block; margin-bottom: 10px; }
+        .pot-box { background: #081c15; border: 2px solid #d8f3dc; padding: 10px; border-radius: 8px; margin: 10px 0; font-size: 20px; font-weight: bold; color: #ffb703; }
         .player-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
         .player-card { background: rgba(0,0,0,0.25); padding: 10px; border-radius: 8px; border: 2px solid transparent; text-align: left; }
         .player-card.active-turn { border-color: #ffb703; background: rgba(255, 183, 3, 0.15); }
@@ -38,6 +39,7 @@
         </div>
 
         <div id="game-section" style="display: none;">
+            <div id="round-indicator" class="round-badge">대기 중</div>
             <div class="pot-box">
                 💰 총 판돈(POT): <span id="pot-amount">0</span> 칩
             </div>
@@ -91,10 +93,17 @@
         socket.on('updateGameState', (state) => {
             document.getElementById('pot-amount').innerText = state.pot.toLocaleString();
 
+            const badge = document.getElementById('round-indicator');
+            if (state.gameInProgress) {
+                badge.innerText = state.bettingRound === 1 ? '1차 배팅 진행 중' : '2차 배팅 진행 중';
+            } else {
+                badge.innerText = '대기 중';
+            }
+
             const container = document.getElementById('players-container');
             container.innerHTML = state.players.map(p => {
                 const isMyTurn = p.id === state.turnPlayerId;
-                let statusText = `배팅액: ${p.betAmount.toLocaleString()}`;
+                let statusText = `라운드 배팅액: ${p.betAmount.toLocaleString()}`;
                 if (p.folded) statusText = '❌ 다이 (Fold)';
                 if (p.isAllIn) statusText = '🔥 올인 (All-In)';
 
