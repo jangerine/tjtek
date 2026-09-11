@@ -100,6 +100,8 @@
                 badge.innerText = '대기 중';
             }
 
+            const me = state.players.find(p => p.id === myId);
+
             const container = document.getElementById('players-container');
             container.innerHTML = state.players.map(p => {
                 const isMyTurn = p.id === state.turnPlayerId;
@@ -119,10 +121,23 @@
             document.getElementById('start-btn').style.display = state.gameInProgress ? 'none' : 'inline-block';
 
             const isMyTurn = myId === state.turnPlayerId && state.gameInProgress;
+            
+            // 버튼별 세부 비활성화 제어
             document.getElementById('btn-fold').disabled = !isMyTurn;
             document.getElementById('btn-call').disabled = !isMyTurn;
-            document.getElementById('btn-raise').disabled = !isMyTurn;
-            document.getElementById('btn-allin').disabled = !isMyTurn;
+            
+            if (me && isMyTurn) {
+                const raiseTarget = state.currentBet === 0 ? 1000 : state.currentBet * 2;
+                const additionalBetNeeded = raiseTarget - me.betAmount;
+
+                // 칩이 모자라면 레이즈 버튼 비활성화
+                document.getElementById('btn-raise').disabled = me.chips < additionalBetNeeded;
+                // 칩이 0이면 올인 버튼 비활성화
+                document.getElementById('btn-allin').disabled = me.chips <= 0;
+            } else {
+                document.getElementById('btn-raise').disabled = true;
+                document.getElementById('btn-allin').disabled = true;
+            }
         });
 
         socket.on('gameStarted', (data) => {
