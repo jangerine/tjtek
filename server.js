@@ -167,7 +167,7 @@ function nextTurn() {
             allPlayers: players,
             pot
         });
-        pot = 0; // 기권승 시 판돈 초기화
+        pot = 0;
         resetGameVars();
         broadcastGameState();
         return;
@@ -194,10 +194,8 @@ function finishShowdown() {
     const outcome = calculateGameOutcome(surviving);
 
     if (outcome.isRematch) {
-        // 재경기(구사/멍구사): 판돈(pot)을 유지한 채 이월
         io.emit('gameFinished', { outcome, allPlayers: players, pot });
     } else {
-        // 일반 승리: 승자에게 판돈 지급 후 pot 초기화
         outcome.winner.chips += pot;
         io.emit('gameFinished', { outcome, allPlayers: players, pot });
         pot = 0;
@@ -207,7 +205,6 @@ function finishShowdown() {
     broadcastGameState();
 }
 
-// 🔧 핵심 수정 위치: 라운드 종료 후 게임 변수만 초기화 (유저의 칩 유지)
 function resetGameVars() {
     gameInProgress = false;
     currentBet = 0;
@@ -219,7 +216,6 @@ function resetGameVars() {
         p.isAllIn = false;
         p.cards = [];
         
-        // 칩이 0 이하로 거덜난 유저만 최소 기본 충전금 지급
         if (p.chips <= 0) {
             p.chips = STARTING_CHIPS;
         }
@@ -263,7 +259,6 @@ io.on('connection', (socket) => {
         bettingRound = 1;
         currentBet = ANTE;
 
-        // 게임 시작 시 참가자의 잔여 칩에서 ANTE(500)만큼 차감
         players.forEach(p => {
             p.chips -= ANTE;
             p.betAmount = ANTE;
@@ -293,32 +288,47 @@ io.on('connection', (socket) => {
         broadcastGameState();
     });
 
+    // 🔧 핵심 수정 위치: 돈이 부족할 때 배팅 제약 조건 강화
     socket.on('playerAction', (action) => {
         if (!gameInProgress) return;
         const player = activePlayers[turnIndex];
         if (!player || player.id !== socket.id) return;
+
+        // 이미 올인 상태이거나 이미 다이한 유저는 액션 불가
+        if (player.isAllIn || player.folded) {
+            nextTurn();
+            return;
+        }
 
         const callAmount = currentBet - player.betAmount;
 
         if (action === 'fold') {
             player.folded = true;
         } else if (action === 'call') {
-            const betNeeded = Math.min(callAmount, player.chips);
-            player.chips -= betNeeded;
-            player.betAmount += betNeeded;
-            pot += betNeeded;
-            if (player.chips === 0) player.isAllIn = true;
-        } else if (action === 'raise') {
-            const raiseTarget = currentBet === 0 ? ANTE * 2 : currentBet * 2;
-            const additionalBet = raiseTarget - player.betAmount;
-
-            if (player.chips <= additionalBet) {
+            if (player.chips === 0) {
+                // 돈이 전혀 없으면 콜 불가 -> 자동 올인 상태 전환 후 넘어감
+                player.isAllIn = true;
+            } else if (player.chips <= callAmount) {
+                // 보유 칩이 콜 금액 이하일 경우 -> 올인 콜
                 const allInAmount = player.chips;
                 player.chips = 0;
                 player.betAmount += allInAmount;
                 pot += allInAmount;
                 player.isAllIn = true;
-                if (player.betAmount > currentBet) currentBet = player.betAmount;
+            } else {
+                // 정상 콜
+                player.chips -= callAmount;
+                player.betAmount += callAmount;
+                pot += callAmount;
+            }
+        } else if (action === 'raise') {
+            const raiseTarget = currentBet === 0 ? ANTE * 2 : currentBet * 2;
+            const additionalBet = raiseTarget - player.betAmount;
+
+            if (player.chips < additionalBet) {
+                // 레이즈할 돈이 모자란 경우 경고 메시지 전달 후 액션 취소
+                socket.emit('errorMessage', '칩이 부족하여 레이즈할 수 없습니다. (콜 또는 올인을 사용하세요)');
+                return; // 순서를 넘기지 않고 다시 선택하게 함
             } else {
                 player.chips -= additionalBet;
                 player.betAmount += additionalBet;
@@ -327,6 +337,10 @@ io.on('connection', (socket) => {
                 playersToAct = activePlayers.filter(p => !p.folded && !p.isAllIn).length;
             }
         } else if (action === 'allin') {
+            if (player.chips <= 0) {
+                socket.emit('errorMessage', '배팅할 칩이 없습니다.');
+                return;
+            }
             const allInAmount = player.chips;
             player.chips = 0;
             player.betAmount += allInAmount;
