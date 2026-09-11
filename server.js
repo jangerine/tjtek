@@ -38,6 +38,7 @@ let gameInProgress = false;
 let pot = 0;
 let currentTurnIndex = 0;
 let currentHighBet = 0;
+let actionCount = 0; // 한 라운드 내 액션 수행 횟수
 const BASE_BET = 500;
 
 // 🧠 섯다 족보 계산 함수
@@ -89,6 +90,7 @@ function shuffleDeck() {
     return deck;
 }
 
+// 다음 순서 플레이어 찾기 (Fold/All-in 제외)
 function getNextTurnIndex(startIndex) {
     let idx = (startIndex + 1) % players.length;
     let count = 0;
@@ -102,7 +104,8 @@ function getNextTurnIndex(startIndex) {
     return startIndex;
 }
 
-function getActivePlayersCount() {
+// 살아있는(Fold하지 않은) 플레이어 수
+function getAlivePlayersCount() {
     return players.filter(p => !p.folded).length;
 }
 
@@ -156,10 +159,10 @@ io.on('connection', (socket) => {
         gameInProgress = true;
         pot = 0;
         currentHighBet = BASE_BET;
+        actionCount = 0;
 
         const deck = shuffleDeck();
 
-        // 🎴 2장씩 바로 지급
         players.forEach(p => {
             p.chips -= BASE_BET;
             p.betAmount = BASE_BET;
@@ -172,7 +175,6 @@ io.on('connection', (socket) => {
         currentTurnIndex = 0;
         broadcastGameState();
 
-        // 2장의 패 및 족보 전송
         players.forEach(p => {
             const handInfo = evaluateHand(p.cards);
             io.to(p.id).emit('gameStarted', {
@@ -186,6 +188,8 @@ io.on('connection', (socket) => {
         if (!gameInProgress) return;
         const player = players[currentTurnIndex];
         if (socket.id !== player.id || player.folded) return;
+
+        actionCount++;
 
         if (action === 'fold') {
             player.folded = true;
@@ -222,10 +226,12 @@ io.on('connection', (socket) => {
             player.isAllIn = true;
         }
 
-        if (getActivePlayersCount() === 1) {
+        // 1. 다이 후 단 1명만 살아남은 경우 -> 기권 승리
+        if (getAlivePlayersCount() === 1) {
             return finishGameByFold();
         }
 
+        // 2. 게임 진행 상황 검사 (다음 턴으로 넘기거나 Showdown)
         checkTurnProgress();
     });
 
@@ -240,10 +246,15 @@ io.on('connection', (socket) => {
 });
 
 function checkTurnProgress() {
-    const activePlayers = players.filter(p => !p.folded && !p.isAllIn);
-    const isRoundComplete = activePlayers.every(p => p.betAmount === currentHighBet);
+    const alivePlayers = players.filter(p => !p.folded); // Fold 안 한 플레이어들
+    const activePlayers = alivePlayers.filter(p => !p.isAllIn); // 올인도 안 한 플레이어들
 
-    if (isRoundComplete || activePlayers.length <= 1) {
+    // 배팅 완료 조건:
+    // 1) 최소한 턴이 한 바퀴 이상 진행되었고 (actionCount >= alivePlayers.length)
+    // 2) 생존한 플레이어들의 배팅액이 최고 배팅액(currentHighBet)과 같거나 올인 상태인 경우
+    const isBetsEqual = alivePlayers.every(p => p.betAmount === currentHighBet || p.isAllIn);
+
+    if ((actionCount >= alivePlayers.length && isBetsEqual) || activePlayers.length <= 1) {
         finishGameWithShowdown();
     } else {
         currentTurnIndex = getNextTurnIndex(currentTurnIndex);
@@ -258,8 +269,8 @@ function finishGameByFold() {
     io.emit('gameFinished', {
         outcome: {
             winner,
-            winnerHand: '상대 전원 기권',
-            desc: `${winner.name} 님이 독식합니다!`
+            winnerHand: '상대 전원 다이',
+            desc: `${winner.name} 님이 판돈을 독식합니다!`
         },
         pot,
         allPlayers: players.map(p => ({
