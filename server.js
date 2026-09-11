@@ -1,9 +1,8 @@
 const express = require('express');
-const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
-const https = require('https'); // 👈 추가된 모듈
+const https = require('https');
 
 const app = express();
 const server = http.createServer(app);
@@ -11,7 +10,7 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 🖼️ 외부 화투 이미지 보안 차단(핫링크) 우회 프록시 라우트 (추가된 부분)
+// 🖼️ 외부 화투 이미지 보안 차단(핫링크) 우회 프록시 라우트
 app.get('/proxy-img', (req, res) => {
     const targetUrl = req.query.url;
     if (!targetUrl) return res.status(400).send('No URL');
@@ -25,141 +24,134 @@ app.get('/proxy-img', (req, res) => {
 
     https.get(targetUrl, options, (stream) => {
         res.setHeader('Content-Type', stream.headers['content-type'] || 'image/svg+xml');
-        res.setHeader('Cache-Control', 'public, max-age=86400'); // 캐싱 적용
+        res.setHeader('Cache-Control', 'public, max-age=86400');
         stream.pipe(res);
     }).on('error', (err) => {
         res.status(500).send('Image fetch error');
     });
 });
 
-// ... (이하 기존 server.js 코드 그대로 유지)
-
-const http = require('http');
-const { Server } = require('socket.io');
-const path = require('path');
-
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
-
-app.use(express.static(path.join(__dirname, 'public')));
-
-// 20장 화투 패 정의
-const INITIAL_DECK = [
-    { month: 1, type: 'kwang', name: '1광' }, { month: 1, type: 'pi', name: '1피' },
-    { month: 2, type: 'yeol', name: '2열' }, { month: 2, type: 'pi', name: '2피' },
-    { month: 3, type: 'kwang', name: '3광' }, { month: 3, type: 'pi', name: '3피' },
-    { month: 4, type: 'yeol', name: '4열' }, { month: 4, type: 'pi', name: '4피' },
-    { month: 5, type: 'yeol', name: '5열' }, { month: 5, type: 'pi', name: '5피' },
-    { month: 6, type: 'tti', name: '6띠' }, { month: 6, type: 'pi', name: '6피' },
-    { month: 7, type: 'yeol', name: '7열' }, { month: 7, type: 'pi', name: '7피' },
-    { month: 8, type: 'kwang', name: '8광' }, { month: 8, type: 'pi', name: '8피' },
-    { month: 9, type: 'yeol', name: '9열' }, { month: 9, type: 'pi', name: '9피' },
-    { month: 10, type: 'yeol', name: '10열' }, { month: 10, type: 'pi', name: '10피' }
+// 🎴 섯다 20장 덱 정의
+const ALL_CARDS = [
+    { month: 1, type: 'kwang', name: '1광' },
+    { month: 1, type: 'pi', name: '1피' },
+    { month: 2, type: 'yeol', name: '2열' },
+    { month: 2, type: 'pi', name: '2피' },
+    { month: 3, type: 'kwang', name: '3광' },
+    { month: 3, type: 'pi', name: '3피' },
+    { month: 4, type: 'yeol', name: '4열' },
+    { month: 4, type: 'pi', name: '4피' },
+    { month: 5, type: 'yeol', name: '5열' },
+    { month: 5, type: 'pi', name: '5피' },
+    { month: 6, type: 'tti', name: '6띠' },
+    { month: 6, type: 'pi', name: '6피' },
+    { month: 7, type: 'yeol', name: '7열' },
+    { month: 7, type: 'pi', name: '7피' },
+    { month: 8, type: 'kwang', name: '8광' },
+    { month: 8, type: 'pi', name: '8피' },
+    { month: 9, type: 'yeol', name: '9열' },
+    { month: 9, type: 'pi', name: '9피' },
+    { month: 10, type: 'yeol', name: '10열' },
+    { month: 10, type: 'pi', name: '10피' }
 ];
 
-const STARTING_CHIPS = 10000;
-const ANTE = 500;
-
-let players = [];
+// 게임 상태 변수
+let players = []; // { id, name, chips, cards, folded, betAmount, isAllIn }
 let gameInProgress = false;
+let pot = 0;
+let currentTurnIndex = 0;
+let bettingRound = 1; // 1차, 2차 배팅
+let currentHighBet = 0;
+let BASE_BET = 500; // 판돈 기본금
 
-let pot = 0;               // 판돈
-let currentBet = 0;        // 현재 라운드의 최고 배팅금액
-let turnIndex = 0;         // 현재 베팅 순서
-let bettingRound = 1;      // 1: 1차 배팅, 2: 2차 배팅
-let activePlayers = [];    
-let playersToAct = 0;      
+// 🧠 섯다 족보 계산 함수
+function evaluateHand(cards) {
+    if (!cards || cards.length < 2) return { score: 0, name: '없음' };
 
-// 섯다 족보 판정 함수
-function evaluateHand(card1, card2) {
-    const m1 = Math.min(card1.month, card2.month);
-    const m2 = Math.max(card1.month, card2.month);
-    
-    const isCard1Kwang = card1.type === 'kwang';
-    const isCard2Kwang = card2.type === 'kwang';
-    const kwangCount = (isCard1Kwang ? 1 : 0) + (isCard2Kwang ? 1 : 0);
+    const c1 = cards[0];
+    const c2 = cards[1];
 
-    // 광땡
-    if (m1 === 3 && m2 === 8 && kwangCount === 2) return { rank: 1000, name: '38광땡', code: '38KWANG' };
-    if (m1 === 1 && m2 === 8 && kwangCount === 2) return { rank: 990, name: '18광땡', code: 'KWANG' };
-    if (m1 === 1 && m2 === 3 && kwangCount === 2) return { rank: 990, name: '13광땡', code: 'KWANG' };
-
-    // 특수 족보
-    if (m1 === 4 && m2 === 7 && card1.type === 'yeol' && card2.type === 'yeol') {
-        return { rank: 1, name: '암행어사', code: 'INSPECTOR' };
+    // 1. 광땡
+    if ((c1.name === '3광' && c2.name === '8광') || (c1.name === '8광' && c2.name === '3광')) {
+        return { score: 1000, name: '38광땡' };
     }
-    if (m1 === 3 && m2 === 7 && ((card1.month === 3 && isCard1Kwang) || (card2.month === 3 && isCard2Kwang))) {
-        return { rank: 2, name: '땡잡이', code: 'CATCH_DDANG' };
+    if ((c1.name === '1광' && c2.name === '8광') || (c1.name === '8광' && c2.name === '1광')) {
+        return { score: 990, name: '18광땡' };
     }
-    if (m1 === 4 && m2 === 9 && card1.type === 'yeol' && card2.type === 'yeol') {
-        return { rank: 3, name: '멍구사 (재경기)', code: 'MUNG_GUSA' };
-    }
-    if (m1 === 4 && m2 === 9) {
-        return { rank: 3, name: '구사 (재경기)', code: 'GUSA' };
+    if ((c1.name === '1광' && c2.name === '3광') || (c1.name === '3광' && c2.name === '1광')) {
+        return { score: 980, name: '13광땡' };
     }
 
-    // 땡
-    if (m1 === m2) {
-        return { rank: 800 + m1, name: `${m1 === 10 ? '장' : m1}땡`, code: m1 === 10 ? 'JANG_DDANG' : 'DDANG' };
+    // 특수 족보: 암행어사 (4열 + 7열) -> 18, 13광땡 잡음
+    const is47 = (c1.name === '4열' && c2.name === '7열') || (c1.name === '7열' && c2.name === '4열');
+
+    // 특수 족보: 땡잡이 (3광 + 7열) -> 9땡 이하 잡음
+    const isDdaengJabi = (c1.name === '3광' && c2.name === '7열') || (c1.name === '7열' && c2.name === '3광');
+
+    // 특수 족보: 구사 (4월 + 9월) -> 알리 이하 시 재경기
+    const isGusa = (c1.month === 4 && c2.month === 9) || (c1.month === 9 && c2.month === 4);
+
+    // 2. 땡 (10땡 ~ 1땡)
+    if (c1.month === c2.month) {
+        return { score: 800 + c1.month, name: `${c1.month}땡`, isDdaeng: true, month: c1.month };
     }
 
-    // 중간 족보
-    if (m1 === 1 && m2 === 2) return { rank: 700, name: '알리', code: 'SPECIAL' };
-    if (m1 === 1 && m2 === 4) return { rank: 690, name: '독사', code: 'SPECIAL' };
-    if (m1 === 1 && m2 === 9) return { rank: 680, name: '구삥', code: 'SPECIAL' };
-    if (m1 === 1 && m2 === 10) return { rank: 670, name: '장삥', code: 'SPECIAL' };
-    if (m1 === 4 && m2 === 10) return { rank: 660, name: '장사', code: 'SPECIAL' };
-    if (m1 === 4 && m2 === 6) return { rank: 650, name: '세륙', code: 'SPECIAL' };
+    // 3. 중간 족보 (알리, 독사, 구삥, 장삥, 장사, 세륙)
+    const m1 = Math.min(c1.month, c2.month);
+    const m2 = Math.max(c1.month, c2.month);
 
-    // 끗 / 망통
-    const score = (m1 + m2) % 10;
-    if (score === 9) return { rank: 500, name: '갑오 (9끗)', code: 'KKUT' };
-    if (score === 0) return { rank: 10, name: '망통 (0끗)', code: 'KKUT' };
-    
-    return { rank: score * 10, name: `${score}끗`, code: 'KKUT' };
+    if (m1 === 1 && m2 === 2) return { score: 700, name: '알리' };
+    if (m1 === 1 && m2 === 4) return { score: 600, name: '독사' };
+    if (m1 === 1 && m2 === 9) return { score: 500, name: '구삥' };
+    if (m1 === 1 && m2 === 10) return { score: 400, name: '장삥' };
+    if (m1 === 4 && m2 === 10) return { score: 300, name: '장사' };
+    if (m1 === 4 && m2 === 6) return { score: 200, name: '세륙' };
+
+    // 4. 끗 (갑오 ~ 1끗, 망통)
+    const scoreSum = (c1.month + c2.month) % 10;
+    let name = scoreSum === 9 ? '갑오 (9끗)' : (scoreSum === 0 ? '망통 (0끗)' : `${scoreSum}끗`);
+
+    return { 
+        score: 100 + scoreSum, 
+        name, 
+        is47, 
+        isDdaengJabi, 
+        isGusa 
+    };
 }
 
-// 승자 및 재경기 판정
-function calculateGameOutcome(survivingPlayers) {
-    const hasKwangNot38 = survivingPlayers.some(p => p.handResult.code === 'KWANG');
-    const hasNormalDdang = survivingPlayers.some(p => p.handResult.code === 'DDANG');
-    const hasInspector = survivingPlayers.some(p => p.handResult.code === 'INSPECTOR');
-    const hasCatchDdang = survivingPlayers.some(p => p.handResult.code === 'CATCH_DDANG');
-    const hasGusa = survivingPlayers.some(p => p.handResult.code === 'GUSA');
-    const hasMungGusa = survivingPlayers.some(p => p.handResult.code === 'MUNG_GUSA');
-
-    let maxRank = Math.max(...survivingPlayers.map(p => p.handResult.rank));
-
-    if (hasInspector && hasKwangNot38) {
-        const inspectorPlayer = survivingPlayers.find(p => p.handResult.code === 'INSPECTOR');
-        return { isRematch: false, winner: inspectorPlayer, winnerHand: '암행어사 (광땡 잡음!)', desc: '암행어사가 광땡을 제압했습니다!' };
+// 덱 셔플
+function shuffleDeck() {
+    let deck = [...ALL_CARDS];
+    for (let i = deck.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [deck[i], deck[j]] = [deck[j], deck[i]];
     }
-
-    if (hasCatchDdang && hasNormalDdang && maxRank < 810) {
-        const catchPlayer = survivingPlayers.find(p => p.handResult.code === 'CATCH_DDANG');
-        return { isRematch: false, winner: catchPlayer, winnerHand: '땡잡이 (땡 잡음!)', desc: '땡잡이가 땡을 제압했습니다!' };
-    }
-
-    if (maxRank <= 700) {
-        if (hasMungGusa) return { isRematch: true, desc: '멍구사 발동! 판에 장땡 이상이 없어 판돈을 이월하고 재경기를 진행합니다.' };
-        if (hasGusa && maxRank < 801) return { isRematch: true, desc: '구사 발동! 판에 땡 이상이 없어 판돈을 이월하고 재경기를 진행합니다.' };
-    }
-
-    let winner = survivingPlayers.reduce((prev, current) => (prev.handResult.rank > current.handResult.rank) ? prev : current);
-
-    return { isRematch: false, winner: winner, winnerHand: winner.handResult.name, desc: '' };
+    return deck;
 }
 
+// 다음 순서 플레이어 찾기
+function getNextTurnIndex(startIndex) {
+    let idx = (startIndex + 1) % players.length;
+    let count = 0;
+    while (count < players.length) {
+        if (!players[idx].folded && !players[idx].isAllIn) {
+            return idx;
+        }
+        idx = (idx + 1) % players.length;
+        count++;
+    }
+    return startIndex;
+}
+
+// 생존 플레이어 수 확인
+function getActivePlayersCount() {
+    return players.filter(p => !p.folded).length;
+}
+
+// 방송: 전체 게임 상태 업데이트
 function broadcastGameState() {
-    const turnPlayerId = activePlayers[turnIndex] ? activePlayers[turnIndex].id : null;
-    
     io.emit('updateGameState', {
-        pot,
-        currentBet,
-        turnPlayerId,
-        bettingRound,
-        gameInProgress,
         players: players.map(p => ({
             id: p.id,
             name: p.name,
@@ -167,237 +159,277 @@ function broadcastGameState() {
             betAmount: p.betAmount,
             folded: p.folded,
             isAllIn: p.isAllIn
-        }))
+        })),
+        pot,
+        gameInProgress,
+        turnPlayerId: gameInProgress && players[currentTurnIndex] ? players[currentTurnIndex].id : null,
+        bettingRound
     });
 }
 
-function startSecondBettingRound() {
-    bettingRound = 2;
-    currentBet = 0;
-    
-    activePlayers.forEach(p => {
-        p.betAmount = 0;
-    });
-
-    turnIndex = 0;
-    while (activePlayers[turnIndex].folded || activePlayers[turnIndex].isAllIn) {
-        turnIndex = (turnIndex + 1) % activePlayers.length;
-    }
-    
-    playersToAct = activePlayers.filter(p => !p.folded && !p.isAllIn).length;
-    broadcastGameState();
-}
-
-function nextTurn() {
-    playersToAct--;
-
-    const alivePlayers = activePlayers.filter(p => !p.folded);
-    
-    // 기권승
-    if (alivePlayers.length === 1) {
-        const winner = alivePlayers[0];
-        winner.chips += pot;
-        io.emit('gameFinished', {
-            outcome: { isRematch: false, winner, winnerHand: '기권승', desc: '다른 플레이어가 모두 다이했습니다.' },
-            allPlayers: players,
-            pot
-        });
-        pot = 0;
-        resetGameVars();
-        broadcastGameState();
-        return;
-    }
-
-    if (playersToAct <= 0) {
-        if (bettingRound === 1) {
-            startSecondBettingRound();
-        } else {
-            finishShowdown();
-        }
-        return;
-    }
-
-    do {
-        turnIndex = (turnIndex + 1) % activePlayers.length;
-    } while (activePlayers[turnIndex].folded || activePlayers[turnIndex].isAllIn);
-
-    broadcastGameState();
-}
-
-function finishShowdown() {
-    const surviving = activePlayers.filter(p => !p.folded);
-    const outcome = calculateGameOutcome(surviving);
-
-    if (outcome.isRematch) {
-        io.emit('gameFinished', { outcome, allPlayers: players, pot });
-    } else {
-        outcome.winner.chips += pot;
-        io.emit('gameFinished', { outcome, allPlayers: players, pot });
-        pot = 0;
-    }
-
-    resetGameVars();
-    broadcastGameState();
-}
-
-function resetGameVars() {
-    gameInProgress = false;
-    currentBet = 0;
-    bettingRound = 1;
-    
-    players.forEach(p => {
-        p.betAmount = 0;
-        p.folded = false;
-        p.isAllIn = false;
-        p.cards = [];
-        
-        if (p.chips <= 0) {
-            p.chips = STARTING_CHIPS;
-        }
-    });
-}
-
+// 소켓 연결
 io.on('connection', (socket) => {
+    // 1. 플레이어 입장
     socket.on('joinGame', (username) => {
-        if (players.length >= 4) {
-            socket.emit('errorMessage', '방이 가득 찼습니다.');
-            return;
+        if (players.length >= 3) {
+            return socket.emit('errorMessage', '이미 3명 방이 꽉 찼습니다!');
         }
-        const newPlayer = {
+
+        players.push({
             id: socket.id,
             name: username || `플레이어 ${players.length + 1}`,
-            chips: STARTING_CHIPS,
+            chips: 10000, // 기본 칩 10,000 제공
             cards: [],
-            handResult: null,
-            betAmount: 0,
             folded: false,
+            betAmount: 0,
             isAllIn: false
-        };
-        players.push(newPlayer);
+        });
+
         broadcastGameState();
     });
 
+    // 2. 게임 시작 (3인 필수)
     socket.on('startGame', () => {
-        if (players.length < 2) {
-            socket.emit('errorMessage', '최소 2명 이상 필요합니다.');
-            return;
-        }
         if (gameInProgress) return;
-
-        const brokePlayer = players.find(p => p.chips < ANTE);
-        if (brokePlayer) {
-            socket.emit('errorMessage', `${brokePlayer.name}님의 칩이 부족합니다 (최소 기본금 500 필요).`);
-            return;
+        if (players.length < 3) {
+            return socket.emit('errorMessage', '3명이 모두 모여야 게임을 시작할 수 있습니다! (현재 ' + players.length + '/3명)');
         }
 
-        gameInProgress = true;
-        bettingRound = 1;
-        currentBet = ANTE;
+        // 칩 부족 체크
+        for (let p of players) {
+            if (p.chips < BASE_BET) {
+                return socket.emit('errorMessage', `${p.name} 님의 칩이 부족합니다.`);
+            }
+        }
 
+        // 초기화
+        gameInProgress = true;
+        pot = 0;
+        bettingRound = 1;
+        currentHighBet = BASE_BET;
+
+        // 판돈(기본 배팅) 차감
         players.forEach(p => {
-            p.chips -= ANTE;
-            p.betAmount = ANTE;
+            p.chips -= BASE_BET;
+            p.betAmount = BASE_BET;
             p.folded = false;
             p.isAllIn = false;
             p.cards = [];
-            pot += ANTE;
+            pot += BASE_BET;
         });
 
-        activePlayers = [...players];
-        turnIndex = 0;
-        playersToAct = activePlayers.length;
-
-        let deck = [...INITIAL_DECK].sort(() => Math.random() - 0.5);
+        // 카드 섞기 및 1차 카드 지급 (1장씩)
+        const deck = shuffleDeck();
         players.forEach(p => {
-            p.cards = [deck.pop(), deck.pop()];
-            p.handResult = evaluateHand(p.cards[0], p.cards[1]);
+            p.cards.push(deck.pop());
         });
 
-        players.forEach(p => {
-            io.to(p.id).emit('gameStarted', {
-                myCards: p.cards,
-                myHand: p.handResult
-            });
-        });
+        // 남아있는 카드 저장
+        gameDeck = deck;
+
+        // 첫 번째 선 정하기
+        currentTurnIndex = 0;
 
         broadcastGameState();
+
+        // 각 플레이어별 패 전송 (1차)
+        players.forEach(p => {
+            const handInfo = evaluateHand(p.cards);
+            io.to(p.id).emit('gameStarted', {
+                myCards: p.cards,
+                myHand: handInfo
+            });
+        });
     });
 
-    // 🔧 핵심 수정 위치: 돈이 부족할 때 배팅 제약 조건 강화
+    // 3. 배팅 액션 처리 (콜 / 레이즈 / 다이 / 올인)
     socket.on('playerAction', (action) => {
         if (!gameInProgress) return;
-        const player = activePlayers[turnIndex];
-        if (!player || player.id !== socket.id) return;
-
-        // 이미 올인 상태이거나 이미 다이한 유저는 액션 불가
-        if (player.isAllIn || player.folded) {
-            nextTurn();
-            return;
-        }
-
-        const callAmount = currentBet - player.betAmount;
+        const player = players[currentTurnIndex];
+        if (socket.id !== player.id || player.folded) return;
 
         if (action === 'fold') {
             player.folded = true;
         } else if (action === 'call') {
-            if (player.chips === 0) {
-                // 돈이 전혀 없으면 콜 불가 -> 자동 올인 상태 전환 후 넘어감
-                player.isAllIn = true;
-            } else if (player.chips <= callAmount) {
-                // 보유 칩이 콜 금액 이하일 경우 -> 올인 콜
-                const allInAmount = player.chips;
+            const needBet = currentHighBet - player.betAmount;
+            if (player.chips <= needBet) {
+                // 남은 칩 다 올인
+                pot += player.chips;
+                player.betAmount += player.chips;
                 player.chips = 0;
-                player.betAmount += allInAmount;
-                pot += allInAmount;
                 player.isAllIn = true;
             } else {
-                // 정상 콜
-                player.chips -= callAmount;
-                player.betAmount += callAmount;
-                pot += callAmount;
+                player.chips -= needBet;
+                player.betAmount += needBet;
+                pot += needBet;
             }
         } else if (action === 'raise') {
-            const raiseTarget = currentBet === 0 ? ANTE * 2 : currentBet * 2;
-            const additionalBet = raiseTarget - player.betAmount;
-
-            if (player.chips < additionalBet) {
-                // 레이즈할 돈이 모자란 경우 경고 메시지 전달 후 액션 취소
-                socket.emit('errorMessage', '칩이 부족하여 레이즈할 수 없습니다. (콜 또는 올인을 사용하세요)');
-                return; // 순서를 넘기지 않고 다시 선택하게 함
+            const targetBet = currentHighBet * 2;
+            const needBet = targetBet - player.betAmount;
+            if (player.chips >= needBet) {
+                player.chips -= needBet;
+                player.betAmount += needBet;
+                pot += needBet;
+                currentHighBet = targetBet;
             } else {
-                player.chips -= additionalBet;
-                player.betAmount += additionalBet;
-                pot += additionalBet;
-                currentBet = raiseTarget;
-                playersToAct = activePlayers.filter(p => !p.folded && !p.isAllIn).length;
+                return socket.emit('errorMessage', '칩이 부족하여 레이즈할 수 없습니다!');
             }
         } else if (action === 'allin') {
-            if (player.chips <= 0) {
-                socket.emit('errorMessage', '배팅할 칩이 없습니다.');
-                return;
+            pot += player.chips;
+            player.betAmount += player.chips;
+            if (player.betAmount > currentHighBet) {
+                currentHighBet = player.betAmount;
             }
-            const allInAmount = player.chips;
             player.chips = 0;
-            player.betAmount += allInAmount;
-            pot += allInAmount;
             player.isAllIn = true;
-
-            if (player.betAmount > currentBet) {
-                currentBet = player.betAmount;
-                playersToAct = activePlayers.filter(p => !p.folded && !p.isAllIn).length;
-            }
         }
 
-        nextTurn();
+        // 혼자 남은 경우 승리 처리
+        if (getActivePlayersCount() === 1) {
+            return finishGameByFold();
+        }
+
+        // 턴 진행 검사
+        checkTurnProgress();
     });
 
+    // 접속 해제
     socket.on('disconnect', () => {
         players = players.filter(p => p.id !== socket.id);
-        activePlayers = activePlayers.filter(p => p.id !== socket.id);
-        if (players.length < 2) resetGameVars();
+        if (players.length < 3 && gameInProgress) {
+            gameInProgress = false;
+            io.emit('errorMessage', '플레이어 퇴장으로 게임이 중단되었습니다.');
+        }
         broadcastGameState();
     });
 });
 
+// 턴 및 라운드 진행 체크
+function checkTurnProgress() {
+    const activePlayers = players.filter(p => !p.folded && !p.isAllIn);
+    
+    // 배팅이 완료되었는지 확인 (모두 콜 금액을 채웠거나 한 명 제외 모두 Fold/All-in)
+    const isRoundComplete = activePlayers.every(p => p.betAmount === currentHighBet);
+
+    if (isRoundComplete || activePlayers.length <= 1) {
+        if (bettingRound === 1) {
+            // 2차 라운드로 이동: 2번째 카드 지급
+            bettingRound = 2;
+            players.forEach(p => {
+                if (!p.folded) {
+                    p.cards.push(gameDeck.pop());
+                }
+            });
+
+            // 플레이어 카드 정보 개별 전송
+            players.forEach(p => {
+                if (!p.folded) {
+                    const handInfo = evaluateHand(p.cards);
+                    io.to(p.id).emit('gameStarted', {
+                        myCards: p.cards,
+                        myHand: handInfo
+                    });
+                }
+            });
+
+            currentTurnIndex = getNextTurnIndex(-1);
+            broadcastGameState();
+        } else {
+            // 2차 배팅 종료 -> 최종 결과 판정
+            finishGameWithShowdown();
+        }
+    } else {
+        // 다음 턴 이동
+        currentTurnIndex = getNextTurnIndex(currentTurnIndex);
+        broadcastGameState();
+    }
+}
+
+// 다이로 인한 게임 종료
+function finishGameByFold() {
+    const winner = players.find(p => !p.folded);
+    winner.chips += pot;
+
+    io.emit('gameFinished', {
+        outcome: {
+            winner,
+            winnerHand: '상대 전원 다이',
+            desc: `${winner.name} 님이 판돈을 독식합니다!`
+        },
+        pot,
+        allPlayers: players.map(p => ({
+            name: p.name,
+            cards: p.cards,
+            handResult: evaluateHand(p.cards),
+            folded: p.folded
+        }))
+    });
+
+    gameInProgress = false;
+    broadcastGameState();
+}
+
+// 승부(Showdown) 판정
+function finishGameWithShowdown() {
+    const activePlayers = players.filter(p => !p.folded);
+    
+    // 각 플레이어 족보 계산
+    const results = activePlayers.map(p => {
+        const hand = evaluateHand(p.cards);
+        return { player: p, hand };
+    });
+
+    // 1차점수순 정렬
+    results.sort((a, b) => b.hand.score - a.hand.score);
+
+    let winner = results[0].player;
+    let winnerHand = results[0].hand.name;
+    let desc = '';
+
+    // 특수 족보(암행어사/땡잡이/구사) 예외 처리
+    const highestHand = results[0].hand;
+    
+    // 땡잡이 체크 (상대 중 9땡 이하 땡이 있고, 내 패가 땡잡이인 경우)
+    const ddaengJabiPlayer = results.find(r => r.hand.isDdaengJabi);
+    const hasDdaengUnder9 = results.some(r => r.hand.isDdaeng && r.hand.month <= 9);
+    if (ddaengJabiPlayer && hasDdaengUnder9) {
+        winner = ddaengJabiPlayer.player;
+        winnerHand = '땡잡이 (승리!)';
+        desc = '🎯 땡잡이가 땡을 제압했습니다!';
+    }
+
+    // 암행어사 체크 (상대 중 18/13광땡이 있고 내 패가 암행어사인 경우)
+    const amhaengPlayer = results.find(r => r.hand.is47);
+    const hasKwangDdaeng = results.some(r => r.hand.name === '18광땡' || r.hand.name === '13광땡');
+    if (amhaengPlayer && hasKwangDdaeng) {
+        winner = amhaengPlayer.player;
+        winnerHand = '암행어사 (승리!)';
+        desc = '🗡️ 암행어사가 광땡을 제압했습니다!';
+    }
+
+    // 승자에게 판돈 지급
+    winner.chips += pot;
+
+    io.emit('gameFinished', {
+        outcome: {
+            winner,
+            winnerHand,
+            desc
+        },
+        pot,
+        allPlayers: players.map(p => ({
+            name: p.name,
+            cards: p.cards,
+            handResult: evaluateHand(p.cards),
+            folded: p.folded
+        }))
+    });
+
+    gameInProgress = false;
+    broadcastGameState();
+}
+
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`서버가 포트 ${PORT}에서 실행 중입니다.`));
+server.listen(PORT, () => {
+    console.log(`섯다 서버 시작: http://localhost:${PORT}`);
+});
