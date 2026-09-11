@@ -1,4 +1,39 @@
 const express = require('express');
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const path = require('path');
+const https = require('https'); // 👈 추가된 모듈
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+app.use(express.static(path.join(__dirname, 'public')));
+
+// 🖼️ 외부 화투 이미지 보안 차단(핫링크) 우회 프록시 라우트 (추가된 부분)
+app.get('/proxy-img', (req, res) => {
+    const targetUrl = req.query.url;
+    if (!targetUrl) return res.status(400).send('No URL');
+
+    const options = {
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://commons.wikimedia.org/'
+        }
+    };
+
+    https.get(targetUrl, options, (stream) => {
+        res.setHeader('Content-Type', stream.headers['content-type'] || 'image/svg+xml');
+        res.setHeader('Cache-Control', 'public, max-age=86400'); // 캐싱 적용
+        stream.pipe(res);
+    }).on('error', (err) => {
+        res.status(500).send('Image fetch error');
+    });
+});
+
+// ... (이하 기존 server.js 코드 그대로 유지)
+
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
