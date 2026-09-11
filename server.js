@@ -1,121 +1,136 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public')));
 
-// 화투패 20장 구성 (월, 피/열/광 구분)
-const DECK = [
-  { month: 1, kwang: true, id: '1k' }, { month: 1, kwang: false, id: '1p' },
-  { month: 2, kwang: false, id: '2a' }, { month: 2, kwang: false, id: '2b' },
-  { month: 3, kwang: true, id: '3k' }, { month: 3, kwang: false, id: '3p' },
-  { month: 4, kwang: false, id: '4a' }, { month: 4, kwang: false, id: '4b' },
-  { month: 5, kwang: false, id: '5a' }, { month: 5, kwang: false, id: '5b' },
-  { month: 6, kwang: false, id: '6a' }, { month: 6, kwang: false, id: '6b' },
-  { month: 7, kwang: false, id: '7a' }, { month: 7, kwang: false, id: '7b' },
-  { month: 8, kwang: true, id: '8k' }, { month: 8, kwang: false, id: '8p' },
-  { month: 9, kwang: false, id: '9a' }, { month: 9, kwang: false, id: '9b' },
-  { month: 10, kwang: false, id: '10a' }, { month: 10, kwang: false, id: '10b' }
+// 20장의 화투 패 정의 (1월~10월 각 2장씩, 광/열/띠/피 구분을 위한 메타데이터 포함)
+const INITIAL_DECK = [
+    { month: 1, type: 'kwang', name: '1광' }, { month: 1, type: 'pi', name: '1피' },
+    { month: 2, type: 'yeol', name: '2열' }, { month: 2, type: 'pi', name: '2피' },
+    { month: 3, type: 'kwang', name: '3광' }, { month: 3, type: 'pi', name: '3피' },
+    { month: 4, type: 'yeol', name: '4열' }, { month: 4, type: 'pi', name: '4피' },
+    { month: 5, type: 'yeol', name: '5열' }, { month: 5, type: 'pi', name: '5피' },
+    { month: 6, type: 'tti', name: '6띠' }, { month: 6, type: 'pi', name: '6피' },
+    { month: 7, type: 'yeol', name: '7열' }, { month: 7, type: 'pi', name: '7피' },
+    { month: 8, type: 'kwang', name: '8광' }, { month: 8, type: 'pi', name: '8피' },
+    { month: 9, type: 'yeol', name: '9열' }, { month: 9, type: 'pi', name: '9피' },
+    { month: 10, type: 'yeol', name: '10열' }, { month: 10, type: 'pi', name: '10피' }
 ];
 
-let players = {};
-let gameState = {
-  started: false,
-  deck: [],
-  hands: {}
-};
+let players = [];
+let gameInProgress = false;
 
-// 족보 계산 함수 (점수가 높을수록 강함)
+// 섯다 족보 판정 함수
 function evaluateHand(card1, card2) {
-  const m1 = card1.month, m2 = card2.month;
-  const k1 = card1.kwang, k2 = card2.kwang;
+    const m1 = Math.min(card1.month, card2.month);
+    const m2 = Math.max(card1.month, card2.month);
+    
+    // 광땡 처리
+    if (m1 === 3 && m2 === 8 && card1.type === 'kwang' && card2.type === 'kwang') {
+        return { rank: 1000, name: '38광땡' };
+    }
+    if (m1 === 1 && m2 === 8 && card1.type === 'kwang' && card2.type === 'kwang') {
+        return { rank: 990, name: '18광땡' };
+    }
+    if (m1 === 1 && m2 === 3 && card1.type === 'kwang' && card2.type === 'kwang') {
+        return { rank: 990, name: '13광땡' };
+    }
 
-  // 1. 광땡
-  if (k1 && k2) {
-    if ((m1 === 3 && m2 === 8) || (m1 === 8 && m2 === 3)) return { name: '38광땡', score: 1000 };
-    if ((m1 === 1 && m2 === 8) || (m1 === 8 && m2 === 1)) return { name: '18광땡', score: 999 };
-    if ((m1 === 1 && m2 === 3) || (m1 === 3 && m2 === 1)) return { name: '13광땡', score: 998 };
-  }
+    // 땡 (같은 월 2장)
+    if (m1 === m2) {
+        return { rank: 800 + m1, name: `${m1 === 10 ? '장' : m1}땡` };
+    }
 
-  // 2. 땡
-  if (m1 === m2) {
-    return { name: `${m1}땡`, score: 500 + m1 };
-  }
+    // 특수 족보
+    if (m1 === 1 && m2 === 2) return { rank: 700, name: '알리' };
+    if (m1 === 1 && m2 === 4) return { rank: 690, name: '독사' };
+    if (m1 === 1 && m2 === 9) return { rank: 680, name: '구삥' };
+    if (m1 === 1 && m2 === 10) return { rank: 670, name: '장삥' };
+    if (m1 === 4 && m2 === 10) return { rank: 660, name: '장사' };
+    if (m1 === 4 && m2 === 6) return { rank: 650, name: '세륙' };
 
-  // 3. 알리, 독사, 구빙, 장빙, 장사, 세륙 (특수 족보)
-  const pair = [m1, m2].sort((a, b) => a - b).join(',');
-  if (pair === '1,2') return { name: '알리', score: 400 };
-  if (pair === '1,4') return { name: '독사', score: 390 };
-  if (pair === '1,9') return { name: '구빙', score: 380 };
-  if (pair === '1,10') return { name: '장빙', score: 370 };
-  if (pair === '4,10') return { name: '장사', score: 360 };
-  if (pair === '4,6') return { name: '세륙', score: 350 };
-
-  // 4. 끗 (두 달의 합의 일의 자리)
-  const kkut = (m1 + m2) % 10;
-  if (kkut === 0) return { name: '망통', score: 0 };
-  return { name: `${kkut}끗`, score: 100 + kkut };
-}
-
-function shuffle(array) {
-  return array.slice().sort(() => Math.random() - 0.5);
+    // 끗 및 망통
+    const score = (m1 + m2) % 10;
+    if (score === 9) return { rank: 500, name: '갑오 (9끗)' };
+    if (score === 0) return { rank: 0, name: '망통 (0끗)' };
+    
+    return { rank: score * 10, name: `${score}끗` };
 }
 
 io.on('connection', (socket) => {
-  console.log(`플레이어 접속: ${socket.id}`);
+    console.log('유저 접속:', socket.id);
 
-  // 유저 입장
-  socket.on('join', (nickname) => {
-    players[socket.id] = { id: socket.id, nickname: nickname || '익명' };
-    io.emit('updatePlayers', Object.values(players));
-  });
+    socket.on('joinGame', (username) => {
+        if (players.length >= 4) {
+            socket.emit('errorMessage', '방이 가득 찼습니다. (최대 4명)');
+            return;
+        }
+        players.push({
+            id: socket.id,
+            name: username || `플레이어 ${players.length + 1}`,
+            cards: [],
+            handResult: null
+        });
 
-  // 게임 시작
-  socket.on('startGame', () => {
-    const playerIds = Object.keys(players);
-    if (playerIds.length < 2) {
-      socket.emit('message', '최소 2명의 플레이어가 필요합니다.');
-      return;
-    }
-
-    gameState.deck = shuffle(DECK);
-    gameState.hands = {};
-    gameState.started = true;
-
-    // 각 플레이어에게 카드 2장씩 분배
-    playerIds.forEach(id => {
-      const c1 = gameState.deck.pop();
-      const c2 = gameState.deck.pop();
-      const result = evaluateHand(c1, c2);
-
-      gameState.hands[id] = {
-        cards: [c1, c2],
-        result: result
-      };
-
-      // 본인에게만 본인 카드 전달
-      io.to(id).emit('gameStarted', {
-        cards: [c1, c2],
-        result: result
-      });
+        io.emit('updatePlayerList', players);
     });
 
-    io.emit('message', '게임이 시작되었습니다! 카드를 확인하세요.');
-  });
+    socket.on('startGame', () => {
+        if (players.length < 2) {
+            socket.emit('errorMessage', '최소 2명 이상이어야 게임을 시작할 수 있습니다.');
+            return;
+        }
 
-  // 퇴장 처리
-  socket.on('disconnect', () => {
-    delete players[socket.id];
-    delete gameState.hands[socket.id];
-    io.emit('updatePlayers', Object.values(players));
-  });
+        gameInProgress = true;
+        // 덱 셔플
+        let deck = [...INITIAL_DECK].sort(() => Math.random() - 0.5);
+
+        // 카드리스트 부여
+        players.forEach(p => {
+            p.cards = [deck.pop(), deck.pop()];
+            p.handResult = evaluateHand(p.cards[0], p.cards[1]);
+        });
+
+        // 각 개별 플레이어에게 자신의 카드 전송
+        players.forEach(p => {
+            io.to(p.id).emit('gameStarted', {
+                myCards: p.cards,
+                myHand: p.handResult,
+                playersInfo: players.map(pl => ({ name: pl.name, id: pl.id }))
+            });
+        });
+    });
+
+    socket.on('showResult', () => {
+        if (!gameInProgress) return;
+
+        // 가장 높은 족보 판정
+        let winner = players.reduce((prev, current) => {
+            return (prev.handResult.rank > current.handResult.rank) ? prev : current;
+        });
+
+        io.emit('gameFinished', {
+            winner: winner.name,
+            winnerHand: winner.handResult.name,
+            allPlayers: players
+        });
+
+        gameInProgress = false;
+    });
+
+    socket.on('disconnect', () => {
+        players = players.filter(p => p.id !== socket.id);
+        io.emit('updatePlayerList', players);
+    });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`서버가 포트 ${PORT}에서 실행 중입니다.`);
+    console.log(`서버가 포트 ${PORT}에서 실행 중입니다.`);
 });
