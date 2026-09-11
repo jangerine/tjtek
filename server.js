@@ -138,13 +138,12 @@ function broadcastGameState() {
 
 function startSecondBettingRound() {
     bettingRound = 2;
-    currentBet = 0; // 2차 배팅금액 기준 초기화
+    currentBet = 0;
     
     activePlayers.forEach(p => {
-        p.betAmount = 0; // 2라운드 베팅 금액 초기화
+        p.betAmount = 0;
     });
 
-    // 베팅 순서 리셋
     turnIndex = 0;
     while (activePlayers[turnIndex].folded || activePlayers[turnIndex].isAllIn) {
         turnIndex = (turnIndex + 1) % activePlayers.length;
@@ -168,24 +167,21 @@ function nextTurn() {
             allPlayers: players,
             pot
         });
+        pot = 0; // 기권승 시 판돈 초기화
         resetGameVars();
         broadcastGameState();
         return;
     }
 
-    // 현재 라운드 배팅 종료 처리
     if (playersToAct <= 0) {
         if (bettingRound === 1) {
-            // 1차 배팅 완료 ➔ 2차 배팅으로 이동
             startSecondBettingRound();
         } else {
-            // 2차 배팅 완료 ➔ 승자 결정
             finishShowdown();
         }
         return;
     }
 
-    // 다음 순서 플레이어 찾기
     do {
         turnIndex = (turnIndex + 1) % activePlayers.length;
     } while (activePlayers[turnIndex].folded || activePlayers[turnIndex].isAllIn);
@@ -198,8 +194,10 @@ function finishShowdown() {
     const outcome = calculateGameOutcome(surviving);
 
     if (outcome.isRematch) {
+        // 재경기(구사/멍구사): 판돈(pot)을 유지한 채 이월
         io.emit('gameFinished', { outcome, allPlayers: players, pot });
     } else {
+        // 일반 승리: 승자에게 판돈 지급 후 pot 초기화
         outcome.winner.chips += pot;
         io.emit('gameFinished', { outcome, allPlayers: players, pot });
         pot = 0;
@@ -209,15 +207,22 @@ function finishShowdown() {
     broadcastGameState();
 }
 
+// 🔧 핵심 수정 위치: 라운드 종료 후 게임 변수만 초기화 (유저의 칩 유지)
 function resetGameVars() {
     gameInProgress = false;
     currentBet = 0;
     bettingRound = 1;
+    
     players.forEach(p => {
         p.betAmount = 0;
         p.folded = false;
         p.isAllIn = false;
         p.cards = [];
+        
+        // 칩이 0 이하로 거덜난 유저만 최소 기본 충전금 지급
+        if (p.chips <= 0) {
+            p.chips = STARTING_CHIPS;
+        }
     });
 }
 
@@ -258,7 +263,7 @@ io.on('connection', (socket) => {
         bettingRound = 1;
         currentBet = ANTE;
 
-        // 판돈 징수
+        // 게임 시작 시 참가자의 잔여 칩에서 ANTE(500)만큼 차감
         players.forEach(p => {
             p.chips -= ANTE;
             p.betAmount = ANTE;
@@ -272,14 +277,12 @@ io.on('connection', (socket) => {
         turnIndex = 0;
         playersToAct = activePlayers.length;
 
-        // 덱 섞기 및 2장 바로 배분
         let deck = [...INITIAL_DECK].sort(() => Math.random() - 0.5);
         players.forEach(p => {
             p.cards = [deck.pop(), deck.pop()];
             p.handResult = evaluateHand(p.cards[0], p.cards[1]);
         });
 
-        // 클라이언트로 패 전송
         players.forEach(p => {
             io.to(p.id).emit('gameStarted', {
                 myCards: p.cards,
