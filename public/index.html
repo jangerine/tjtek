@@ -6,20 +6,31 @@
     <title>온라인 실시간 섯다</title>
     <style>
         body { font-family: 'Noto Sans KR', sans-serif; background-color: #1b4332; color: #fff; text-align: center; padding: 20px; }
-        .container { max-width: 600px; margin: 0 auto; background: #2d6a4f; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
-        h1 { color: #d8f3dc; }
-        input, button { padding: 10px 15px; font-size: 16px; margin: 5px; border-radius: 5px; border: none; }
-        button { background-color: #52b788; color: white; cursor: pointer; font-weight: bold; }
-        button:hover { background-color: #74c69d; }
-        .card-box { display: flex; justify-content: center; gap: 10px; margin: 20px 0; }
-        .card { width: 80px; height: 120px; background: #b7094c; border: 2px solid #fff; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; color: white; }
-        .result-box { background: rgba(0, 0, 0, 0.3); padding: 15px; border-radius: 8px; margin-top: 15px; }
-        .rematch-text { color: #ffbe0b; font-size: 20px; font-weight: bold; }
+        .container { max-width: 650px; margin: 0 auto; background: #2d6a4f; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        h1 { color: #d8f3dc; margin-bottom: 5px; }
+        input, button { padding: 10px 15px; font-size: 15px; margin: 5px; border-radius: 5px; border: none; font-weight: bold; }
+        button { cursor: pointer; color: white; background-color: #52b788; }
+        button:hover { filter: brightness(1.1); }
+        button:disabled { background-color: #6c757d !important; cursor: not-allowed; opacity: 0.6; }
+        .btn-fold { background-color: #e63946; }
+        .btn-call { background-color: #3a86ff; }
+        .btn-raise { background-color: #ff006e; }
+        .btn-allin { background-color: #fb5607; }
+        
+        .pot-box { background: #081c15; border: 2px solid #d8f3dc; padding: 10px; border-radius: 8px; margin: 15px 0; font-size: 20px; font-weight: bold; color: #ffb703; }
+        .player-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
+        .player-card { background: rgba(0,0,0,0.25); padding: 10px; border-radius: 8px; border: 2px solid transparent; text-align: left; }
+        .player-card.active-turn { border-color: #ffb703; background: rgba(255, 183, 3, 0.15); }
+        .player-card.folded { opacity: 0.4; }
+        
+        .card-box { display: flex; justify-content: center; gap: 10px; margin: 15px 0; }
+        .card { width: 70px; height: 105px; background: #b7094c; border: 2px solid #fff; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: bold; }
+        .result-box { background: rgba(0, 0, 0, 0.4); padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid #ffb703; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🎴 온라인 실시간 섯다</h1>
+        <h1>🎴 풀배팅 실시간 섯다</h1>
         
         <div id="login-section">
             <input type="text" id="username" placeholder="닉네임 입력">
@@ -27,15 +38,27 @@
         </div>
 
         <div id="game-section" style="display: none;">
-            <h3>대기 중인 플레이어 목록</h3>
-            <ul id="player-list" style="list-style: none; padding: 0;"></ul>
+            <div class="pot-box">
+                💰 총 판돈(POT): <span id="pot-amount">0</span> 칩
+            </div>
+
+            <div class="player-grid" id="players-container"></div>
             
-            <button onclick="startGame()">게임 시작 (패 나눠주기)</button>
+            <button id="start-btn" onclick="startGame()" style="background-color: #ffb703; color: #000;">게임 시작 (판돈 500 칩)</button>
             
-            <div class="card-box" id="my-cards"></div>
-            <h2 id="my-hand-title"></h2>
+            <div id="play-area" style="display: none;">
+                <div class="card-box" id="my-cards"></div>
+                <h3 id="my-hand-title"></h3>
+                
+                <!-- 배팅 액션 버튼 -->
+                <div id="betting-controls">
+                    <button class="btn-fold" id="btn-fold" onclick="sendAction('fold')">다이 (Fold)</button>
+                    <button class="btn-call" id="btn-call" onclick="sendAction('call')">콜 (Call)</button>
+                    <button class="btn-raise" id="btn-raise" onclick="sendAction('raise')">2배 레이즈</button>
+                    <button class="btn-allin" id="btn-allin" onclick="sendAction('allin')">올인 (All-In)</button>
+                </div>
+            </div>
             
-            <button id="result-btn" onclick="showResult()" style="display: none; background-color: #e63946;">결과 공개하기</button>
             <div id="game-results" class="result-box" style="display: none;"></div>
         </div>
     </div>
@@ -43,6 +66,7 @@
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
+        let myId = '';
 
         function joinGame() {
             const username = document.getElementById('username').value;
@@ -53,28 +77,58 @@
             document.getElementById('game-section').style.display = 'block';
         }
 
-        socket.on('updatePlayerList', (players) => {
-            const list = document.getElementById('player-list');
-            list.innerHTML = players.map(p => `<li>👤 ${p.name}</li>`).join('');
-        });
-
         function startGame() {
             socket.emit('startGame');
         }
 
+        function sendAction(action) {
+            socket.emit('playerAction', action);
+        }
+
+        socket.on('connect', () => {
+            myId = socket.id;
+        });
+
+        socket.on('updateGameState', (state) => {
+            document.getElementById('pot-amount').innerText = state.pot.toLocaleString();
+            
+            // 플레이어 목록 갱신
+            const container = document.getElementById('players-container');
+            container.innerHTML = state.players.map(p => {
+                const isMyTurn = p.id === state.turnPlayerId;
+                let statusText = `배팅: ${p.betAmount.toLocaleString()}`;
+                if (p.folded) statusText = '❌ 다이 (Fold)';
+                if (p.isAllIn) statusText = '🔥 올인 (All-In)';
+
+                return `
+                    <div class="player-card ${isMyTurn ? 'active-turn' : ''} ${p.folded ? 'folded' : ''}">
+                        <b>👤 ${p.name} ${p.id === myId ? '(나)' : ''}</b><br/>
+                        🪙 칩: ${p.chips.toLocaleString()}<br/>
+                        📢 ${statusText}
+                    </div>
+                `;
+            }).join('');
+
+            // 시작 버튼 제어
+            document.getElementById('start-btn').style.display = state.gameInProgress ? 'none' : 'inline-block';
+
+            // 베팅 버튼 활성화 제어 (내 턴일 때만)
+            const isMyTurn = myId === state.turnPlayerId && state.gameInProgress;
+            document.getElementById('btn-fold').disabled = !isMyTurn;
+            document.getElementById('btn-call').disabled = !isMyTurn;
+            document.getElementById('btn-raise').disabled = !isMyTurn;
+            document.getElementById('btn-allin').disabled = !isMyTurn;
+        });
+
         socket.on('gameStarted', (data) => {
             document.getElementById('game-results').style.display = 'none';
-            document.getElementById('result-btn').style.display = 'inline-block';
+            document.getElementById('play-area').style.display = 'block';
             
             const cardBox = document.getElementById('my-cards');
             cardBox.innerHTML = data.myCards.map(c => `<div class="card">${c.name}</div>`).join('');
             
             document.getElementById('my-hand-title').innerText = `내 족보: ${data.myHand.name}`;
         });
-
-        function showResult() {
-            socket.emit('showResult');
-        }
 
         socket.on('gameFinished', (data) => {
             const resultDiv = document.getElementById('game-results');
@@ -84,18 +138,19 @@
             const outcome = data.outcome;
 
             if (outcome.isRematch) {
-                html += `<div class="rematch-text">🔄 ${outcome.desc}</div><hr/>`;
+                html += `<h2 style="color: #ffbe0b;">🔄 ${outcome.desc}</h2><hr/>`;
             } else {
-                html += `<h2>🏆 승자: ${outcome.winner} (${outcome.winnerHand})</h2>`;
-                if (outcome.desc) {
-                    html += `<p style="color: #ffbe0b;">⚡ ${outcome.desc}</p>`;
-                }
+                html += `<h2>🏆 승자: ${outcome.winner.name} (${outcome.winnerHand})</h2>`;
+                html += `<h3>🎉 획득 판돈: ${data.pot.toLocaleString()} 칩</h3>`;
+                if (outcome.desc) html += `<p style="color: #ffbe0b;">⚡ ${outcome.desc}</p>`;
                 html += `<hr/>`;
             }
 
-            html += `<h3>전체 패 공개</h3>`;
+            html += `<h4>전체 패 공개</h4>`;
             data.allPlayers.forEach(p => {
-                html += `<p><b>${p.name}</b>: ${p.cards.map(c=>c.name).join(', ')} → <i>${p.handResult.name}</i></p>`;
+                const handName = p.handResult ? p.handResult.name : '기권';
+                const cardNames = p.cards.length > 0 ? p.cards.map(c => c.name).join(', ') : '패 없음';
+                html += `<p><b>${p.name}</b>: ${cardNames} → <i>${p.folded ? '다이' : handName}</i></p>`;
             });
             
             resultDiv.innerHTML = html;
