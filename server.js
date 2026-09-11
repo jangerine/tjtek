@@ -9,7 +9,6 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 20장의 화투 패 정의 (1월~10월 각 2장씩, 광/열/띠/피 구분을 위한 메타데이터 포함)
 const INITIAL_DECK = [
     { month: 1, type: 'kwang', name: '1광' }, { month: 1, type: 'pi', name: '1피' },
     { month: 2, type: 'yeol', name: '2열' }, { month: 2, type: 'pi', name: '2피' },
@@ -25,29 +24,22 @@ const INITIAL_DECK = [
 
 let players = [];
 let gameInProgress = false;
+let pot = 0; // 누적 판돈
+let currentBet = 0; // 현재 턴까지 제시된 최고 베팅액
+let turnIndex = 0; // 현재 베팅할 순서
+const STARTING_CHIPS = 10000;
+const ANTE = 500; // 기본 참가비
 
-// 섯다 족보 판정 함수
 function evaluateHand(card1, card2) {
     const m1 = Math.min(card1.month, card2.month);
     const m2 = Math.max(card1.month, card2.month);
     
-    // 광땡 처리
-    if (m1 === 3 && m2 === 8 && card1.type === 'kwang' && card2.type === 'kwang') {
-        return { rank: 1000, name: '38광땡' };
-    }
-    if (m1 === 1 && m2 === 8 && card1.type === 'kwang' && card2.type === 'kwang') {
-        return { rank: 990, name: '18광땡' };
-    }
-    if (m1 === 1 && m2 === 3 && card1.type === 'kwang' && card2.type === 'kwang') {
-        return { rank: 990, name: '13광땡' };
-    }
+    if (m1 === 3 && m2 === 8 && card1.type === 'kwang' && card2.type === 'kwang') return { rank: 1000, name: '38광땡' };
+    if (m1 === 1 && m2 === 8 && card1.type === 'kwang' && card2.type === 'kwang') return { rank: 990, name: '18광땡' };
+    if (m1 === 1 && m2 === 3 && card1.type === 'kwang' && card2.type === 'kwang') return { rank: 990, name: '13광땡' };
 
-    // 땡 (같은 월 2장)
-    if (m1 === m2) {
-        return { rank: 800 + m1, name: `${m1 === 10 ? '장' : m1}땡` };
-    }
+    if (m1 === m2) return { rank: 800 + m1, name: `${m1 === 10 ? '장' : m1}땡` };
 
-    // 특수 족보
     if (m1 === 1 && m2 === 2) return { rank: 700, name: '알리' };
     if (m1 === 1 && m2 === 4) return { rank: 690, name: '독사' };
     if (m1 === 1 && m2 === 9) return { rank: 680, name: '구삥' };
@@ -55,7 +47,6 @@ function evaluateHand(card1, card2) {
     if (m1 === 4 && m2 === 10) return { rank: 660, name: '장사' };
     if (m1 === 4 && m2 === 6) return { rank: 650, name: '세륙' };
 
-    // 끗 및 망통
     const score = (m1 + m2) % 10;
     if (score === 9) return { rank: 500, name: '갑오 (9끗)' };
     if (score === 0) return { rank: 0, name: '망통 (0끗)' };
@@ -63,9 +54,66 @@ function evaluateHand(card1, card2) {
     return { rank: score * 10, name: `${score}끗` };
 }
 
-io.on('connection', (socket) => {
-    console.log('유저 접속:', socket.id);
+function broadcastGameState() {
+    const activePlayers = players.filter(p => !p.folded);
+    
+    // 생존자가 1명뿐이면 즉시 승리 처리
+    if (gameInProgress && activePlayers.length === 1) {
+        endGame(activePlayers[0]);
+        return;
+    }
 
+    // 모든 참가자의 베팅 금액이 일치하면 결과 발표
+    if (gameInProgress && activePlayers.every(p => p.currentBet === currentBet || p.isAllIn)) {
+        let winner = activePlayers.reduce((prev, curr) => prev.handResult.rank > curr.handResult.rank ? prev : curr);
+        endGame(winner);
+        return;
+    }
+
+    io.emit('gameStateUpdate', {
+        players: players.map(p => ({
+            id: p.id,
+            name: p.name,
+            chips: p.chips,
+            currentBet: p.currentBet,
+            folded: p.folded,
+            isAllIn: p.isAllIn
+        })),
+        pot: pot,
+        currentBet: currentBet,
+        currentTurnId: gameInProgress ? players[turnIndex].id : null,
+        gameInProgress: gameInProgress
+    });
+}
+
+function nextTurn() {
+    do {
+        turnIndex = (turnIndex + 1) % players.length;
+    } while (players[turnIndex].folded || players[turnIndex].isAllIn);
+    
+    broadcastGameState();
+}
+
+function endGame(winner) {
+    winner.chips += pot;
+    io.emit('gameFinished', {
+        winnerName: winner.name,
+        winnerHand: winner.handResult.name,
+        pot: pot,
+        players: players.map(p => ({
+            name: p.name,
+            cards: p.cards,
+            handName: p.handResult.name,
+            folded: p.folded,
+            chips: p.chips
+        }))
+    });
+    gameInProgress = false;
+    pot = 0;
+    currentBet = 0;
+}
+
+io.on('connection', (socket) => {
     socket.on('joinGame', (username) => {
         if (players.length >= 4) {
             socket.emit('errorMessage', '방이 가득 찼습니다. (최대 4명)');
@@ -74,59 +122,101 @@ io.on('connection', (socket) => {
         players.push({
             id: socket.id,
             name: username || `플레이어 ${players.length + 1}`,
+            chips: STARTING_CHIPS,
             cards: [],
-            handResult: null
+            handResult: null,
+            currentBet: 0,
+            folded: false,
+            isAllIn: false
         });
 
-        io.emit('updatePlayerList', players);
+        broadcastGameState();
     });
 
     socket.on('startGame', () => {
         if (players.length < 2) {
-            socket.emit('errorMessage', '최소 2명 이상이어야 게임을 시작할 수 있습니다.');
+            socket.emit('errorMessage', '최소 2명 이상 필요합니다.');
             return;
         }
+        if (gameInProgress) return;
 
         gameInProgress = true;
-        // 덱 셔플
+        pot = 0;
+        currentBet = ANTE;
+        turnIndex = 0;
+
         let deck = [...INITIAL_DECK].sort(() => Math.random() - 0.5);
 
-        // 카드리스트 부여
         players.forEach(p => {
+            p.chips -= ANTE;
+            pot += ANTE;
+            p.currentBet = ANTE;
+            p.folded = false;
+            p.isAllIn = false;
             p.cards = [deck.pop(), deck.pop()];
             p.handResult = evaluateHand(p.cards[0], p.cards[1]);
-        });
 
-        // 각 개별 플레이어에게 자신의 카드 전송
-        players.forEach(p => {
-            io.to(p.id).emit('gameStarted', {
-                myCards: p.cards,
-                myHand: p.handResult,
-                playersInfo: players.map(pl => ({ name: pl.name, id: pl.id }))
+            io.to(p.id).emit('yourCards', {
+                cards: p.cards,
+                hand: p.handResult
             });
         });
+
+        broadcastGameState();
     });
 
-    socket.on('showResult', () => {
+    socket.on('action', (type) => {
         if (!gameInProgress) return;
+        const player = players[turnIndex];
+        if (player.id !== socket.id) return;
 
-        // 가장 높은 족보 판정
-        let winner = players.reduce((prev, current) => {
-            return (prev.handResult.rank > current.handResult.rank) ? prev : current;
-        });
+        const callAmount = currentBet - player.currentBet;
 
-        io.emit('gameFinished', {
-            winner: winner.name,
-            winnerHand: winner.handResult.name,
-            allPlayers: players
-        });
+        if (type === 'call') {
+            if (player.chips <= callAmount) {
+                // 잔액 부족 시 자동으로 올인 처리
+                pot += player.chips;
+                player.currentBet += player.chips;
+                player.chips = 0;
+                player.isAllIn = true;
+            } else {
+                player.chips -= callAmount;
+                pot += callAmount;
+                player.currentBet += callAmount;
+            }
+        } else if (type === 'half') {
+            const raiseAmount = callAmount + Math.floor(pot / 2);
+            if (player.chips <= raiseAmount) {
+                pot += player.chips;
+                player.currentBet += player.chips;
+                currentBet = Math.max(currentBet, player.currentBet);
+                player.chips = 0;
+                player.isAllIn = true;
+            } else {
+                player.chips -= raiseAmount;
+                pot += raiseAmount;
+                player.currentBet += raiseAmount;
+                currentBet = player.currentBet;
+            }
+        } else if (type === 'allin') {
+            pot += player.chips;
+            player.currentBet += player.chips;
+            if (player.currentBet > currentBet) {
+                currentBet = player.currentBet;
+            }
+            player.chips = 0;
+            player.isAllIn = true;
+        } else if (type === 'die') {
+            player.folded = true;
+        }
 
-        gameInProgress = false;
+        nextTurn();
     });
 
     socket.on('disconnect', () => {
         players = players.filter(p => p.id !== socket.id);
-        io.emit('updatePlayerList', players);
+        if (players.length < 2) gameInProgress = false;
+        broadcastGameState();
     });
 });
 
