@@ -1,92 +1,100 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>온라인 섯다 게임</title>
-  <style>
-    body { font-family: 'Arial', sans-serif; background-color: #0f380f; color: #fff; text-align: center; padding: 20px; }
-    #game-box { background: #306230; border: 4px solid #8bac0f; max-width: 500px; margin: 0 auto; padding: 20px; border-radius: 10px; }
-    .card { display: inline-block; width: 70px; height: 110px; background: #9bbc0f; color: #0f380f; border: 2px solid #fff; border-radius: 5px; margin: 10px; font-weight: bold; line-height: 110px; font-size: 18px; }
-    button { padding: 10px 20px; font-size: 16px; background-color: #8bac0f; border: none; cursor: pointer; border-radius: 5px; font-weight: bold; }
-    button:hover { background-color: #9bbc0f; }
-    ul { list-style: none; padding: 0; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>온라인 실시간 섯다</title>
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; background-color: #1b4332; color: #fff; text-align: center; padding: 20px; }
+        .container { max-width: 600px; margin: 0 auto; background: #2d6a4f; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        h1 { color: #d8f3dc; }
+        input, button { padding: 10px 15px; font-size: 16px; margin: 5px; border-radius: 5px; border: none; }
+        button { background-color: #52b788; color: white; cursor: pointer; font-weight: bold; }
+        button:hover { background-color: #74c69d; }
+        .card-box { display: flex; justify-content: center; gap: 10px; margin: 20px 0; }
+        .card { width: 80px; height: 120px; background: #b7094c; border: 2px solid #fff; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; color: white; }
+        .result-box { background: rgba(0, 0, 0, 0.2); padding: 15px; border-radius: 8px; margin-top: 15px; }
+    </style>
 </head>
 <body>
+    <div class="container">
+        <h1>🎴 온라인 실시간 섯다</h1>
+        
+        <div id="login-section">
+            <input type="text" id="username" placeholder="닉네임 입력">
+            <button onclick="joinGame()">입장하기</button>
+        </div>
 
-  <h1>🎴 웹 섯다 게임</h1>
-  
-  <div id="game-box">
-    <div id="login">
-      <input type="text" id="nickname" placeholder="닉네임 입력" style="padding: 8px;">
-      <button onclick="joinGame()">입장하기</button>
+        <div id="game-section" style="display: none;">
+            <h3>대기 중인 플레이어 목록</h3>
+            <ul id="player-list" style="list-style: none; padding: 0;"></ul>
+            
+            <button onclick="startGame()">게임 시작 (패 나눠주기)</button>
+            
+            <div class="card-box" id="my-cards">
+                <!-- 카드가 출력됩니다 -->
+            </div>
+            
+            <h2 id="my-hand-title"></h2>
+            
+            <button id="result-btn" onclick="showResult()" style="display: none; background-color: #e63946;">결과 공개하기</button>
+            
+            <div id="game-results" class="result-box" style="display: none;"></div>
+        </div>
     </div>
 
-    <div id="room" style="display:none;">
-      <h3>접속한 플레이어 목록</h3>
-      <ul id="player-list"></ul>
-      
-      <button onclick="startGame()" style="margin-top: 15px;">게임 시작</button>
-      
-      <hr style="margin: 20px 0; border-color: #8bac0f;">
-      
-      <h3>내 패</h3>
-      <div id="my-cards">
-        <div class="card">?</div>
-        <div class="card">?</div>
-      </div>
-      <h2 id="result" style="color: #ffff55;"></h2>
-      <p id="msg"></p>
-    </div>
-  </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script>
-    const socket = io();
+        function joinGame() {
+            const username = document.getElementById('username').value;
+            if (!username) return alert('닉네임을 입력하세요!');
+            
+            socket.emit('joinGame', username);
+            document.getElementById('login-section').style.display = 'none';
+            document.getElementById('game-section').style.display = 'block';
+        }
 
-    function joinGame() {
-      const nickname = document.getElementById('nickname').value;
-      if (!nickname) return alert('닉네임을 입력하세요!');
-      
-      socket.emit('join', nickname);
-      document.getElementById('login').style.display = 'none';
-      document.getElementById('room').style.display = 'block';
-    }
+        socket.on('updatePlayerList', (players) => {
+            const list = document.getElementById('player-list');
+            list.innerHTML = players.map(p => `<li>👤 ${p.name}</li>`).join('');
+        });
 
-    function startGame() {
-      socket.emit('startGame');
-    }
+        function startGame() {
+            socket.emit('startGame');
+        }
 
-    // 플레이어 목록 업데이트
-    socket.on('updatePlayers', (players) => {
-      const list = document.getElementById('player-list');
-      list.innerHTML = '';
-      players.forEach(p => {
-        const li = document.createElement('li');
-        li.textContent = `👤 ${p.nickname}`;
-        list.appendChild(li);
-      });
-    });
+        socket.on('gameStarted', (data) => {
+            document.getElementById('game-results').style.display = 'none';
+            document.getElementById('result-btn').style.display = 'inline-block';
+            
+            const cardBox = document.getElementById('my-cards');
+            cardBox.innerHTML = data.myCards.map(c => `<div class="card">${c.name}</div>`).join('');
+            
+            document.getElementById('my-hand-title').innerText = `내 족보: ${data.myHand.name}`;
+        });
 
-    // 게임 시작 시 내 카드 받아오기
-    socket.on('gameStarted', (data) => {
-      const cardsDiv = document.getElementById('my-cards');
-      cardsDiv.innerHTML = '';
-      
-      data.cards.forEach(card => {
-        const cardEl = document.createElement('div');
-        cardEl.className = 'card';
-        cardEl.textContent = `${card.month}월${card.kwang ? '(광)' : ''}`;
-        cardsDiv.appendChild(cardEl);
-      });
+        function showResult() {
+            socket.emit('showResult');
+        }
 
-      document.getElementById('result').textContent = `족보: ${data.result.name}`;
-    });
+        socket.on('gameFinished', (data) => {
+            const resultDiv = document.getElementById('game-results');
+            resultDiv.style.display = 'block';
+            
+            let html = `<h2>🏆 승자: ${data.winner} (${data.winnerHand})</h2><hr/>`;
+            html += `<h3>전체 패 공개</h3>`;
+            data.allPlayers.forEach(p => {
+                html += `<p><b>${p.name}</b>: ${p.cards.map(c=>c.name).join(', ')} → <i>${p.handResult.name}</i></p>`;
+            });
+            
+            resultDiv.innerHTML = html;
+        });
 
-    socket.on('message', (text) => {
-      document.getElementById('msg').textContent = text;
-    });
-  </script>
+        socket.on('errorMessage', (msg) => {
+            alert(msg);
+        });
+    </script>
 </body>
 </html>
