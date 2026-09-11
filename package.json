@@ -1,7 +1,7 @@
 {
   "name": "seotda-game",
-  "version": "1.0.0",
-  "description": "Real-time Seotda Game using Socket.io and Render",
+  "version": "1.1.0",
+  "description": "Full-featured Seotda Game with Betting and Special Hands",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
