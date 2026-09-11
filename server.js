@@ -9,6 +9,7 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// 20장 화투 패 정의
 const INITIAL_DECK = [
     { month: 1, type: 'kwang', name: '1광' }, { month: 1, type: 'pi', name: '1피' },
     { month: 2, type: 'yeol', name: '2열' }, { month: 2, type: 'pi', name: '2피' },
@@ -28,18 +29,14 @@ const ANTE = 500;
 let players = [];
 let gameInProgress = false;
 
-// 게임 진행 및 배팅 관련 상태
-let pot = 0;               // 총 판돈
-let currentBet = 0;        // 현재 라운드의 최고 배팅금액
+let pot = 0;               // 판돈
+let currentBet = 0;        // 현재 최고 배팅금액
 let turnIndex = 0;         // 현재 베팅 순서
-let bettingRound = 1;      // 1: 초구 배팅(1장), 2: 재구 배팅(2장)
 let activePlayers = [];    
 let playersToAct = 0;      
-let currentDeck = [];
 
+// 섯다 족보 판정 함수
 function evaluateHand(card1, card2) {
-    if (!card1 || !card2) return { rank: 0, name: '계산 불가' };
-    
     const m1 = Math.min(card1.month, card2.month);
     const m2 = Math.max(card1.month, card2.month);
     
@@ -47,10 +44,12 @@ function evaluateHand(card1, card2) {
     const isCard2Kwang = card2.type === 'kwang';
     const kwangCount = (isCard1Kwang ? 1 : 0) + (isCard2Kwang ? 1 : 0);
 
+    // 1. 광땡
     if (m1 === 3 && m2 === 8 && kwangCount === 2) return { rank: 1000, name: '38광땡', code: '38KWANG' };
     if (m1 === 1 && m2 === 8 && kwangCount === 2) return { rank: 990, name: '18광땡', code: 'KWANG' };
     if (m1 === 1 && m2 === 3 && kwangCount === 2) return { rank: 990, name: '13광땡', code: 'KWANG' };
 
+    // 2. 특수 족보
     if (m1 === 4 && m2 === 7 && card1.type === 'yeol' && card2.type === 'yeol') {
         return { rank: 1, name: '암행어사', code: 'INSPECTOR' };
     }
@@ -64,10 +63,12 @@ function evaluateHand(card1, card2) {
         return { rank: 3, name: '구사 (재경기)', code: 'GUSA' };
     }
 
+    // 3. 땡
     if (m1 === m2) {
         return { rank: 800 + m1, name: `${m1 === 10 ? '장' : m1}땡`, code: m1 === 10 ? 'JANG_DDANG' : 'DDANG' };
     }
 
+    // 4. 중간 족보
     if (m1 === 1 && m2 === 2) return { rank: 700, name: '알리', code: 'SPECIAL' };
     if (m1 === 1 && m2 === 4) return { rank: 690, name: '독사', code: 'SPECIAL' };
     if (m1 === 1 && m2 === 9) return { rank: 680, name: '구삥', code: 'SPECIAL' };
@@ -75,6 +76,7 @@ function evaluateHand(card1, card2) {
     if (m1 === 4 && m2 === 10) return { rank: 660, name: '장사', code: 'SPECIAL' };
     if (m1 === 4 && m2 === 6) return { rank: 650, name: '세륙', code: 'SPECIAL' };
 
+    // 5. 끗 / 망통
     const score = (m1 + m2) % 10;
     if (score === 9) return { rank: 500, name: '갑오 (9끗)', code: 'KKUT' };
     if (score === 0) return { rank: 10, name: '망통 (0끗)', code: 'KKUT' };
@@ -82,6 +84,7 @@ function evaluateHand(card1, card2) {
     return { rank: score * 10, name: `${score}끗`, code: 'KKUT' };
 }
 
+// 승리자 및 재경기 판정
 function calculateGameOutcome(survivingPlayers) {
     const hasKwangNot38 = survivingPlayers.some(p => p.handResult.code === 'KWANG');
     const hasNormalDdang = survivingPlayers.some(p => p.handResult.code === 'DDANG');
@@ -92,21 +95,25 @@ function calculateGameOutcome(survivingPlayers) {
 
     let maxRank = Math.max(...survivingPlayers.map(p => p.handResult.rank));
 
+    // 암행어사
     if (hasInspector && hasKwangNot38) {
         const inspectorPlayer = survivingPlayers.find(p => p.handResult.code === 'INSPECTOR');
         return { isRematch: false, winner: inspectorPlayer, winnerHand: '암행어사 (광땡 잡음!)', desc: '암행어사가 광땡을 제압했습니다!' };
     }
 
+    // 땡잡이
     if (hasCatchDdang && hasNormalDdang && maxRank < 810) {
         const catchPlayer = survivingPlayers.find(p => p.handResult.code === 'CATCH_DDANG');
         return { isRematch: false, winner: catchPlayer, winnerHand: '땡잡이 (땡 잡음!)', desc: '땡잡이가 땡을 제압했습니다!' };
     }
 
+    // 구사 / 멍구사
     if (maxRank <= 700) {
         if (hasMungGusa) return { isRematch: true, desc: '멍구사 발동! 판에 장땡 이상이 없어 판돈을 이월하고 재경기를 진행합니다.' };
         if (hasGusa && maxRank < 801) return { isRematch: true, desc: '구사 발동! 판에 땡 이상이 없어 판돈을 이월하고 재경기를 진행합니다.' };
     }
 
+    // 일반 최고 족보 승자
     let winner = survivingPlayers.reduce((prev, current) => (prev.handResult.rank > current.handResult.rank) ? prev : current);
 
     return { isRematch: false, winner: winner, winnerHand: winner.handResult.name, desc: '' };
@@ -119,7 +126,6 @@ function broadcastGameState() {
         pot,
         currentBet,
         turnPlayerId,
-        bettingRound,
         gameInProgress,
         players: players.map(p => ({
             id: p.id,
@@ -127,50 +133,17 @@ function broadcastGameState() {
             chips: p.chips,
             betAmount: p.betAmount,
             folded: p.folded,
-            isAllIn: p.isAllIn,
-            cardCount: p.cards.length
+            isAllIn: p.isAllIn
         }))
     });
-}
-
-function startSecondBettingRound() {
-    bettingRound = 2;
-    currentBet = 0;
-    
-    // 2번째 카드 배분 및 최종 족보 계산
-    activePlayers.forEach(p => {
-        if (!p.folded) {
-            p.cards.push(currentDeck.pop());
-            p.handResult = evaluateHand(p.cards[0], p.cards[1]);
-            p.betAmount = 0; // 2라운드 베팅 금액 초기화
-        }
-    });
-
-    // 개별 유저에게 2번째 카드가 추가된 정보 업데이트
-    activePlayers.forEach(p => {
-        if (!p.folded) {
-            io.to(p.id).emit('cardsUpdated', {
-                myCards: p.cards,
-                myHand: p.handResult,
-                round: 2
-            });
-        }
-    });
-
-    // 베팅 순서 리셋
-    turnIndex = 0;
-    while (activePlayers[turnIndex].folded || activePlayers[turnIndex].isAllIn) {
-        turnIndex = (turnIndex + 1) % activePlayers.length;
-    }
-    
-    playersToAct = activePlayers.filter(p => !p.folded && !p.isAllIn).length;
-    broadcastGameState();
 }
 
 function nextTurn() {
     playersToAct--;
 
     const alivePlayers = activePlayers.filter(p => !p.folded);
+    
+    // 기권승
     if (alivePlayers.length === 1) {
         const winner = alivePlayers[0];
         winner.chips += pot;
@@ -184,19 +157,13 @@ function nextTurn() {
         return;
     }
 
-    // 현재 베팅 라운드 종료 처리
+    // 모든 배팅 종료 ➔ 쇼다운
     if (playersToAct <= 0) {
-        if (bettingRound === 1) {
-            // 1차 배팅 종료 ➔ 2차 배팅 라운드로 이동
-            startSecondBettingRound();
-        } else {
-            // 2차 배팅 종료 ➔ 최후 승자 공개 (쇼다운)
-            finishShowdown();
-        }
+        finishShowdown();
         return;
     }
 
-    // 다음 순서 찾기 (다이했거나 올인한 사람 패스)
+    // 다음 순서 플레이어
     do {
         turnIndex = (turnIndex + 1) % activePlayers.length;
     } while (activePlayers[turnIndex].folded || activePlayers[turnIndex].isAllIn);
@@ -223,7 +190,6 @@ function finishShowdown() {
 function resetGameVars() {
     gameInProgress = false;
     currentBet = 0;
-    bettingRound = 1;
     players.forEach(p => {
         p.betAmount = 0;
         p.folded = false;
@@ -266,10 +232,9 @@ io.on('connection', (socket) => {
         }
 
         gameInProgress = true;
-        bettingRound = 1;
         currentBet = ANTE;
 
-        // 앤티(기본금) 징수
+        // 판돈 징수
         players.forEach(p => {
             p.chips -= ANTE;
             p.betAmount = ANTE;
@@ -283,17 +248,18 @@ io.on('connection', (socket) => {
         turnIndex = 0;
         playersToAct = activePlayers.length;
 
-        // 덱 섞기 및 각자 1차 카드 1장 배분
-        currentDeck = [...INITIAL_DECK].sort(() => Math.random() - 0.5);
+        // 덱 섞기 및 각 유저에게 패 2장 바로 배분
+        let deck = [...INITIAL_DECK].sort(() => Math.random() - 0.5);
         players.forEach(p => {
-            p.cards = [currentDeck.pop()];
+            p.cards = [deck.pop(), deck.pop()];
+            p.handResult = evaluateHand(p.cards[0], p.cards[1]);
         });
 
-        // 1차 카드 개별 전달
+        // 클라이언트로 본인 카드 전달
         players.forEach(p => {
             io.to(p.id).emit('gameStarted', {
                 myCards: p.cards,
-                round: 1
+                myHand: p.handResult
             });
         });
 
@@ -316,7 +282,7 @@ io.on('connection', (socket) => {
             pot += betNeeded;
             if (player.chips === 0) player.isAllIn = true;
         } else if (action === 'raise') {
-            const raiseTarget = currentBet === 0 ? ANTE * 2 : currentBet * 2;
+            const raiseTarget = currentBet * 2;
             const additionalBet = raiseTarget - player.betAmount;
 
             if (player.chips <= additionalBet) {
