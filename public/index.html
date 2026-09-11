@@ -17,7 +17,8 @@
         .btn-raise { background-color: #ff006e; }
         .btn-allin { background-color: #fb5607; }
         
-        .pot-box { background: #081c15; border: 2px solid #d8f3dc; padding: 10px; border-radius: 8px; margin: 15px 0; font-size: 20px; font-weight: bold; color: #ffb703; }
+        .round-badge { background-color: #ff006e; color: white; padding: 5px 12px; border-radius: 20px; font-size: 14px; font-weight: bold; display: inline-block; margin-bottom: 10px; }
+        .pot-box { background: #081c15; border: 2px solid #d8f3dc; padding: 10px; border-radius: 8px; margin: 10px 0; font-size: 20px; font-weight: bold; color: #ffb703; }
         .player-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
         .player-card { background: rgba(0,0,0,0.25); padding: 10px; border-radius: 8px; border: 2px solid transparent; text-align: left; }
         .player-card.active-turn { border-color: #ffb703; background: rgba(255, 183, 3, 0.15); }
@@ -30,7 +31,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>🎴 풀배팅 실시간 섯다</h1>
+        <h1>🎴 실시간 섯다</h1>
         
         <div id="login-section">
             <input type="text" id="username" placeholder="닉네임 입력">
@@ -38,6 +39,7 @@
         </div>
 
         <div id="game-section" style="display: none;">
+            <div id="round-indicator" class="round-badge">대기 중</div>
             <div class="pot-box">
                 💰 총 판돈(POT): <span id="pot-amount">0</span> 칩
             </div>
@@ -50,7 +52,6 @@
                 <div class="card-box" id="my-cards"></div>
                 <h3 id="my-hand-title"></h3>
                 
-                <!-- 배팅 액션 버튼 -->
                 <div id="betting-controls">
                     <button class="btn-fold" id="btn-fold" onclick="sendAction('fold')">다이 (Fold)</button>
                     <button class="btn-call" id="btn-call" onclick="sendAction('call')">콜 (Call)</button>
@@ -92,27 +93,31 @@
         socket.on('updateGameState', (state) => {
             document.getElementById('pot-amount').innerText = state.pot.toLocaleString();
             
-            // 플레이어 목록 갱신
+            const badge = document.getElementById('round-indicator');
+            if (state.gameInProgress) {
+                badge.innerText = state.bettingRound === 1 ? '1차 배팅 (초구)' : '2차 배팅 (재구)';
+            } else {
+                badge.innerText = '대기 중';
+            }
+
             const container = document.getElementById('players-container');
             container.innerHTML = state.players.map(p => {
                 const isMyTurn = p.id === state.turnPlayerId;
-                let statusText = `배팅: ${p.betAmount.toLocaleString()}`;
+                let statusText = `라운드 배팅: ${p.betAmount.toLocaleString()}`;
                 if (p.folded) statusText = '❌ 다이 (Fold)';
                 if (p.isAllIn) statusText = '🔥 올인 (All-In)';
 
                 return `
                     <div class="player-card ${isMyTurn ? 'active-turn' : ''} ${p.folded ? 'folded' : ''}">
-                        <b>👤 ${p.name} ${p.id === myId ? '(나)' : ''}</b><br/>
+                        <b>👤 ${p.name} ${p.id === myId ? '(나)' : ''}</b> (${p.cardCount}장)<br/>
                         🪙 칩: ${p.chips.toLocaleString()}<br/>
                         📢 ${statusText}
                     </div>
                 `;
             }).join('');
 
-            // 시작 버튼 제어
             document.getElementById('start-btn').style.display = state.gameInProgress ? 'none' : 'inline-block';
 
-            // 베팅 버튼 활성화 제어 (내 턴일 때만)
             const isMyTurn = myId === state.turnPlayerId && state.gameInProgress;
             document.getElementById('btn-fold').disabled = !isMyTurn;
             document.getElementById('btn-call').disabled = !isMyTurn;
@@ -126,8 +131,13 @@
             
             const cardBox = document.getElementById('my-cards');
             cardBox.innerHTML = data.myCards.map(c => `<div class="card">${c.name}</div>`).join('');
-            
-            document.getElementById('my-hand-title').innerText = `내 족보: ${data.myHand.name}`;
+            document.getElementById('my-hand-title').innerText = '1차 배팅 진행 중... (카드를 1장 더 받아야 족보가 완성됩니다)';
+        });
+
+        socket.on('cardsUpdated', (data) => {
+            const cardBox = document.getElementById('my-cards');
+            cardBox.innerHTML = data.myCards.map(c => `<div class="card">${c.name}</div>`).join('');
+            document.getElementById('my-hand-title').innerText = `최종 족보: ${data.myHand.name}`;
         });
 
         socket.on('gameFinished', (data) => {
@@ -149,7 +159,7 @@
             html += `<h4>전체 패 공개</h4>`;
             data.allPlayers.forEach(p => {
                 const handName = p.handResult ? p.handResult.name : '기권';
-                const cardNames = p.cards.length > 0 ? p.cards.map(c => c.name).join(', ') : '패 없음';
+                const cardNames = p.cards && p.cards.length > 0 ? p.cards.map(c => c.name).join(', ') : '패 없음';
                 html += `<p><b>${p.name}</b>: ${cardNames} → <i>${p.folded ? '다이' : handName}</i></p>`;
             });
             
